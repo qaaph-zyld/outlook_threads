@@ -10,6 +10,7 @@ import config
 from outlook_thread_manager import OutlookThreadManager
 from thread_summarizer import ThreadSummarizer
 from timeline_generator import TimelineGenerator
+from dashboard_generator import DashboardGenerator
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +37,7 @@ class TransportThreadManager:
         self.outlook_manager = OutlookThreadManager()
         self.summarizer = ThreadSummarizer()
         self.timeline_generator = TimelineGenerator()
+        self.dashboard = DashboardGenerator()
         
         # Statistics
         self.stats = {
@@ -87,6 +89,11 @@ class TransportThreadManager:
             
             # Step 3: Generate summary report
             self._generate_summary_report()
+            
+            # Step 4: Generate dashboard
+            dashboard_file = config.OUTPUT_DIR / "dashboard.html"
+            if self.dashboard.generate_html(dashboard_file):
+                logger.info(f"Dashboard generated: {dashboard_file}")
             
             logger.info("\n" + "=" * 80)
             logger.info("PROCESSING COMPLETE")
@@ -142,6 +149,9 @@ class TransportThreadManager:
             # Generate summary
             logger.info("Generating thread summary...")
             summary = self.summarizer.summarize_thread(thread_emails, metadata)
+            
+            # Add to dashboard
+            self.dashboard.add_thread(summary)
             
             # Save summary as Markdown
             summary_md = self.summarizer.format_summary_markdown(summary)

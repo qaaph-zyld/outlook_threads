@@ -137,6 +137,7 @@ class ThreadSummarizer:
             action_items = self._extract_action_items(sorted_emails)
             issues = self._extract_issues(sorted_emails)
             insights = self._extract_conversation_insights(sorted_emails)
+            priority = self._calculate_priority_score(sorted_emails, metadata)
             
             # Create executive summary
             exec_summary = self._create_executive_summary(
@@ -145,6 +146,9 @@ class ThreadSummarizer:
             
             # Determine current status
             current_status = self._determine_status(sorted_emails, metadata)
+            
+            # Generate reply template if response needed
+            reply_template = self._generate_reply_template(insights, metadata)
             
             summary = {
                 'method': 'rule_based',
@@ -156,14 +160,17 @@ class ThreadSummarizer:
                 'action_items': action_items,
                 'current_status': current_status,
                 'issues_risks': issues,
-                'conversation_insights': insights
+                'conversation_insights': insights,
+                'priority': priority,
+                'reply_template': reply_template
             }
             
             logger.info(f"Rule-based summary generated for thread: {metadata['thread_name']}")
             return summary
             
         except Exception as e:
-            logger.error(f"Rule-based summarization failed: {e}")
+            logger.error(f"Rule-based summarization failed: {e}", exc_info=True)
+            logger.error(f"Thread: {metadata.get('thread_name', 'Unknown')}, Emails: {len(thread_emails)}")
             return self._create_fallback_summary(thread_emails, metadata)
     
     def _prepare_thread_text(self, thread_emails: List[Dict]) -> str:
@@ -250,6 +257,80 @@ class ThreadSummarizer:
         
         return action_items[:5]  # Limit to 5 items
     
+    def _calculate_priority_score(self, sorted_emails: List[Dict], metadata: Dict) -> Dict:
+        """
+        Calculate priority score (0-100) for a thread
+        Higher score = more urgent/important
+        """
+        score = 0
+        factors = []
+        
+        if not sorted_emails:
+            return {'score': 0, 'priority': 'Low', 'factors': []}
+        
+        # Factor 1: Urgency keywords (+30 points)
+        if metadata.get('is_urgent'):
+            score += 30
+            factors.append("Contains urgent keywords")
+        
+        # Factor 2: Response needed (+25 points)
+        last_email = sorted_emails[-1]
+        last_body = last_email['body'].lower()
+        if '?' in last_body or any(word in last_body for word in ['please confirm', 'can you', 'need your']):
+            score += 25
+            factors.append("Response/action required")
+        
+        # Factor 3: Recent activity (+20 points if < 2 days)
+        days_since_last = (datetime.now() - last_email['received_time']).days
+        if days_since_last < 2:
+            score += 20
+            factors.append("Recent activity (< 2 days)")
+        elif days_since_last > 7:
+            score -= 10  # Deduct for old threads
+            factors.append("No recent activity (> 7 days)")
+        
+        # Factor 4: Multiple participants (+10 points if > 3)
+        if metadata.get('participant_count', 0) > 3:
+            score += 10
+            factors.append("Multiple stakeholders involved")
+        
+        # Factor 5: Delays/issues (+15 points)
+        if metadata.get('has_delay'):
+            score += 15
+            factors.append("Contains delay indicators")
+        
+        # Factor 6: High email volume (+10 points if > 10 emails)
+        if metadata.get('email_count', 0) > 10:
+            score += 10
+            factors.append("High email volume (active discussion)")
+        
+        # Factor 7: Customs/Transport flags (+5 points each)
+        if metadata.get('is_customs'):
+            score += 5
+            factors.append("Customs-related")
+        if metadata.get('is_transport'):
+            score += 5
+            factors.append("Transport-related")
+        
+        # Normalize score to 0-100
+        score = min(100, max(0, score))
+        
+        # Determine priority level
+        if score >= 70:
+            priority = 'Critical'
+        elif score >= 50:
+            priority = 'High'
+        elif score >= 30:
+            priority = 'Medium'
+        else:
+            priority = 'Low'
+        
+        return {
+            'score': score,
+            'priority': priority,
+            'factors': factors
+        }
+    
     def _extract_conversation_insights(self, sorted_emails: List[Dict]) -> Dict:
         """Extract detailed conversation insights"""
         insights = {
@@ -331,6 +412,44 @@ class ThreadSummarizer:
         
         return insights
     
+    def _generate_reply_template(self, insights: Dict, metadata: Dict) -> str:
+        """Generate a suggested reply template based on insights"""
+        template = ""
+        
+        if not insights.get('response_needed'):
+            return "No response required at this time."
+        
+        # Header
+        template += "Subject: Re: " + metadata.get('thread_name', 'Thread') + "\n\n"
+        template += "Hi team,\n\n"
+        
+        # Context-aware response
+        if insights.get('waiting_on'):
+            template += "Thank you for your patience. "
+            template += "I'm following up on the pending items mentioned in the thread.\n\n"
+        elif '?' in insights.get('next_action', ''):
+            template += "Thank you for your email. "
+            template += "I'd like to address your questions:\n\n"
+            template += "[Answer the specific questions from the last email]\n\n"
+        else:
+            template += "Thank you for the update. "
+            template += "I wanted to confirm the following:\n\n"
+            template += "[Provide your confirmation or update]\n\n"
+        
+        # Add context from thread
+        if metadata.get('is_urgent'):
+            template += "I understand this is urgent and will prioritize accordingly.\n\n"
+        
+        if metadata.get('has_delay'):
+            template += "Regarding the delay mentioned, [provide status update or resolution].\n\n"
+        
+        # Closing
+        template += "Please let me know if you need any additional information.\n\n"
+        template += "Best regards,\n"
+        template += "[Your name]"
+        
+        return template
+    
     def _extract_issues(self, sorted_emails: List[Dict]) -> List[str]:
         """Extract potential issues or risks"""
         issues = []
@@ -400,6 +519,20 @@ class ThreadSummarizer:
     
     def _create_fallback_summary(self, thread_emails: List[Dict], metadata: Dict) -> Dict:
         """Create minimal fallback summary"""
+        # Try to get basic insights even in fallback
+        try:
+            sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
+            insights = self._extract_conversation_insights(sorted_emails)
+        except:
+            insights = {
+                'conversation_flow': [],
+                'key_points': [],
+                'response_needed': False,
+                'next_action': 'Review thread manually',
+                'waiting_on': None,
+                'last_responder': None
+            }
+        
         return {
             'method': 'fallback',
             'thread_name': metadata['thread_name'],
@@ -409,7 +542,8 @@ class ThreadSummarizer:
             'stakeholders': metadata['participants'],
             'action_items': [],
             'current_status': 'Unable to analyze',
-            'issues_risks': []
+            'issues_risks': [],
+            'conversation_insights': insights
         }
     
     def format_summary_markdown(self, summary: Dict) -> str:
@@ -438,6 +572,23 @@ class ThreadSummarizer:
         
         if flags:
             md += f"**Flags**: {' | '.join(flags)}\n\n"
+        
+        # Priority Score
+        if 'priority' in summary:
+            priority_info = summary['priority']
+            priority_emoji = {
+                'Critical': '🔴',
+                'High': '🟠',
+                'Medium': '🟡',
+                'Low': '🟢'
+            }.get(priority_info['priority'], '⚪')
+            
+            md += f"## {priority_emoji} Priority: {priority_info['priority']} ({priority_info['score']}/100)\n\n"
+            if priority_info['factors']:
+                md += "**Priority Factors:**\n"
+                for factor in priority_info['factors']:
+                    md += f"- {factor}\n"
+                md += "\n"
         
         # Executive Summary
         md += "## Executive Summary\n\n"
@@ -508,6 +659,13 @@ class ThreadSummarizer:
             for issue in summary['issues_risks']:
                 md += f"- ⚠️ {issue}\n"
             md += "\n"
+        
+        # Reply Template
+        if 'reply_template' in summary and summary['reply_template'] != "No response required at this time.":
+            md += "## 📧 Suggested Reply Template\n\n"
+            md += "```\n"
+            md += summary['reply_template']
+            md += "\n```\n\n"
         
         # Footer
         md += f"\n---\n*Summary generated using {summary['method']} method*\n"
