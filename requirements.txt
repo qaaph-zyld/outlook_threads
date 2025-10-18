@@ -1,0 +1,11 @@
+pywin32==306
+pandas
+openpyxl
+matplotlib
+plotly
+transformers
+torch
+sentencepiece
+python-dotenv==1.0.0
+networkx
+pillow
