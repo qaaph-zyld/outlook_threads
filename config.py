@@ -18,8 +18,10 @@ LOGS_DIR.mkdir(exist_ok=True)
 # Outlook Configuration
 OUTLOOK_FOLDER_NAME = "Inbox"  # The parent folder to scan for threads
 THREADS_FOLDER_NAME = "Threads"  # Folder to create/use for threads
+ARCHIVE_FOLDER_NAME = "Archive"  # Folder for old threads
 THREAD_MIN_EMAILS = 3  # Minimum number of emails to consider as a thread
 EXCLUDED_FOLDERS = []  # Folders to exclude from processing (set at runtime)
+ARCHIVE_THRESHOLD_DAYS = 60  # Archive threads older than this (2 months)
 
 # AI Configuration (HuggingFace - Local, No API Key Needed!)
 # Uses transformers library with local models

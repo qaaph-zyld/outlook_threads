@@ -175,13 +175,14 @@ class OutlookThreadManager:
             logger.error(f"Error moving thread: {e}")
             return moved_count
     
-    def create_thread_subfolder(self, thread_id: str, thread_name: str):
+    def create_thread_subfolder(self, thread_id: str, thread_name: str, archive: bool = False):
         """
         Create a subfolder for a specific thread
         
         Args:
             thread_id: Unique thread identifier (ConversationID)
             thread_name: Human-readable thread name
+            archive: If True, create in Archive folder instead of Threads
             
         Returns:
             Created folder object
@@ -193,9 +194,17 @@ class OutlookThreadManager:
             # Create unique folder name with ID
             folder_name = f"{clean_name[:50]}_{thread_id[:8]}"
             
-            # Create subfolder under Threads
+            # Determine parent folder (Threads or Archive)
+            if archive:
+                # Get or create Archive folder
+                archive_folder = self._get_or_create_folder(self.inbox, config.ARCHIVE_FOLDER_NAME)
+                parent_folder = archive_folder
+            else:
+                parent_folder = self.threads_folder
+            
+            # Create subfolder
             thread_folder = self._get_or_create_folder(
-                self.threads_folder,
+                parent_folder,
                 folder_name
             )
             

@@ -111,10 +111,18 @@ class TransportThreadManager:
             logger.info(f"  - Participants: {metadata['participant_count']}")
             logger.info(f"  - Duration: {metadata['duration_days']} days")
             
-            # Create thread folder in Outlook
+            # Check if thread should be archived (>2 months old)
+            days_since_last = (datetime.now() - metadata['end_date']).days
+            should_archive = days_since_last > config.ARCHIVE_THRESHOLD_DAYS
+            
+            if should_archive:
+                logger.info(f"  - Thread is {days_since_last} days old - moving to Archive")
+            
+            # Create thread folder in Outlook (in Threads or Archive)
             thread_folder = self.outlook_manager.create_thread_subfolder(
                 conv_id, 
-                thread_name
+                thread_name,
+                archive=should_archive
             )
             
             if not thread_folder:

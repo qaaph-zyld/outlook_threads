@@ -136,6 +136,7 @@ class ThreadSummarizer:
             stakeholders = self._extract_stakeholders(sorted_emails)
             action_items = self._extract_action_items(sorted_emails)
             issues = self._extract_issues(sorted_emails)
+            insights = self._extract_conversation_insights(sorted_emails)
             
             # Create executive summary
             exec_summary = self._create_executive_summary(
@@ -154,7 +155,8 @@ class ThreadSummarizer:
                 'stakeholders': stakeholders,
                 'action_items': action_items,
                 'current_status': current_status,
-                'issues_risks': issues
+                'issues_risks': issues,
+                'conversation_insights': insights
             }
             
             logger.info(f"Rule-based summary generated for thread: {metadata['thread_name']}")
@@ -247,6 +249,87 @@ class ThreadSummarizer:
                         action_items.append(line.strip())
         
         return action_items[:5]  # Limit to 5 items
+    
+    def _extract_conversation_insights(self, sorted_emails: List[Dict]) -> Dict:
+        """Extract detailed conversation insights"""
+        insights = {
+            'conversation_flow': [],
+            'key_points': [],
+            'response_needed': False,
+            'next_action': None,
+            'waiting_on': None,
+            'last_responder': None
+        }
+        
+        if not sorted_emails:
+            return insights
+        
+        # Get last email details
+        last_email = sorted_emails[-1]
+        insights['last_responder'] = last_email['sender']
+        last_body = last_email['body'].lower()
+        
+        # Build conversation flow (who said what)
+        for email in sorted_emails[-5:]:  # Last 5 emails
+            date_str = email['received_time'].strftime('%Y-%m-%d %H:%M')
+            # Get first 150 chars of body as preview
+            preview = email['body'][:150].replace('\n', ' ').strip()
+            if len(email['body']) > 150:
+                preview += '...'
+            
+            insights['conversation_flow'].append({
+                'date': date_str,
+                'sender': email['sender'],
+                'subject': email['subject'],
+                'preview': preview
+            })
+        
+        # Check if response is needed
+        question_indicators = ['?', 'please confirm', 'can you', 'could you', 'would you', 
+                               'need your', 'waiting for', 'please provide', 'please send']
+        if any(indicator in last_body for indicator in question_indicators):
+            insights['response_needed'] = True
+            insights['next_action'] = "Response required - question or request in last email"
+        
+        # Check who we're waiting on
+        waiting_phrases = ['waiting for', 'waiting on', 'pending', 'awaiting']
+        for phrase in waiting_phrases:
+            if phrase in last_body:
+                # Try to extract who we're waiting on
+                idx = last_body.find(phrase)
+                snippet = last_body[idx:idx+100]
+                insights['waiting_on'] = f"Check email: {snippet[:80]}..."
+                insights['next_action'] = "Waiting on external party"
+                break
+        
+        # Extract key discussion points
+        important_words = ['decision', 'agreed', 'confirmed', 'approved', 'rejected', 
+                          'issue', 'problem', 'solution', 'action', 'deadline']
+        for email in sorted_emails:
+            body_lower = email['body'].lower()
+            for word in important_words:
+                if word in body_lower:
+                    # Find sentence with this word
+                    sentences = email['body'].split('.')
+                    for sent in sentences:
+                        if word in sent.lower() and len(sent.strip()) < 150:
+                            insights['key_points'].append(f"[{email['sender']}] {sent.strip()}")
+                            break
+        
+        # Deduplicate key points
+        insights['key_points'] = list(set(insights['key_points']))[:5]
+        
+        # Determine next action if not set
+        if not insights['next_action']:
+            days_since_last = (datetime.now() - last_email['received_time']).days
+            if days_since_last > 7:
+                insights['next_action'] = f"Follow up - no activity for {days_since_last} days"
+            elif insights['response_needed']:
+                insights['next_action'] = "Review and respond to last email"
+            else:
+                insights['next_action'] = "Monitor - no immediate action required"
+        
+        return insights
     
     def _extract_issues(self, sorted_emails: List[Dict]) -> List[str]:
         """Extract potential issues or risks"""
@@ -363,6 +446,40 @@ class ThreadSummarizer:
         # Current Status
         md += "## Current Status\n\n"
         md += f"{summary['current_status']}\n\n"
+        
+        # Conversation Insights
+        if 'conversation_insights' in summary:
+            insights = summary['conversation_insights']
+            md += "## 💡 Conversation Insights\n\n"
+            
+            # Response needed
+            if insights['response_needed']:
+                md += "### ⚠️ Response Needed\n"
+                md += f"**Next Action**: {insights['next_action']}\n\n"
+            else:
+                md += f"**Next Action**: {insights['next_action']}\n\n"
+            
+            # Last responder
+            if insights['last_responder']:
+                md += f"**Last Response From**: {insights['last_responder']}\n\n"
+            
+            # Waiting on
+            if insights['waiting_on']:
+                md += f"**Waiting On**: {insights['waiting_on']}\n\n"
+            
+            # Conversation flow
+            if insights['conversation_flow']:
+                md += "### Recent Conversation Flow\n\n"
+                for msg in insights['conversation_flow']:
+                    md += f"**{msg['date']}** - {msg['sender']}\n"
+                    md += f"> {msg['preview']}\n\n"
+            
+            # Key discussion points
+            if insights['key_points']:
+                md += "### Key Discussion Points\n\n"
+                for point in insights['key_points']:
+                    md += f"- {point}\n"
+                md += "\n"
         
         # Key Events
         if summary['key_events']:
