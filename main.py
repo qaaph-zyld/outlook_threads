@@ -423,81 +423,92 @@ class TransportThreadManager:
         logger.info(f"  Emails Moved:       {self.stats['emails_moved']}")
         logger.info(f"  Summaries Created:  {self.stats['summaries_created']}")
         logger.info(f"  Timelines Created:  {self.stats['timelines_created']}")
-        logger.info(f"  Errors:             {self.stats['errors']}")
 
 
 def main():
     """Main entry point"""
-    print("=" * 80)
-    print("TRANSPORT THREAD MANAGER")
-    print("Automatically organize and analyze email threads for transport coordination")
-    print("=" * 80)
-    print()
-    
     try:
-        # Configuration
-        print(f"Minimum emails per thread: {config.THREAD_MIN_EMAILS}")
+        print("=" * 80)
+        print("TRANSPORT THREAD MANAGER")
+        print("Automatically organize and analyze email threads for transport coordination")
+        print("=" * 80)
         print()
         
-        # Folder exclusion
-        print("Folder Exclusion:")
-        print("Enter folder names to exclude from thread processing (comma-separated)")
-        print("Example: Sent Items, Deleted Items, Archive")
-        print("Leave empty to process all folders")
-        excluded = input("Exclude folders: ").strip()
-        
-        excluded_folders = []
-        if excluded:
-            excluded_folders = [f.strip() for f in excluded.split(',')]
-            print(f"\nWill exclude: {', '.join(excluded_folders)}")
+        # Check if developer mode
+        if config.DEVELOPER_MODE:
+            print("🔧 DEVELOPER MODE ENABLED")
+            print(f"  - Excluded folders: {', '.join(config.DEV_EXCLUDED_FOLDERS)}")
+            print(f"  - Processing mode: {config.DEV_PROCESSING_MODE}")
+            print(f"  - Min emails per thread: {config.THREAD_MIN_EMAILS}")
+            print()
+            
+            excluded_folders = config.DEV_EXCLUDED_FOLDERS
+            mode = config.DEV_PROCESSING_MODE
+            
         else:
-            print("\nNo folders excluded - processing all emails in Inbox")
-        
-        print()
-        
-        # Ask if user wants to reprocess existing threads
-        print("Process existing threads in 'Threads' folder?")
-        print("  - 'new': Only process new threads from Inbox (move to Threads folder)")
-        print("  - 'existing': Regenerate summaries for threads already in Threads folder")
-        print("  - 'both': Process both new and existing threads")
-        print()
-        
-        mode = input("Mode (new/existing/both) [default: new]: ").strip().lower()
-        if not mode:
-            mode = 'new'
-        
-        if mode not in ['new', 'existing', 'both']:
-            print("Invalid mode. Using 'new'.")
-            mode = 'new'
-        
-        print()
-        
-        # Confirmation
-        if mode == 'new':
-            print("This will:")
-            print("  1. Scan your Inbox for email threads")
-            print("  2. Move thread emails to 'Threads' folder")
-            print("  3. Create AI summaries for each thread")
-            print("  4. Generate visual timelines")
-            print("  5. Export to Excel and HTML dashboard")
-        elif mode == 'existing':
-            print("This will:")
-            print("  1. Scan 'Threads' folder for existing threads")
-            print("  2. Regenerate summaries with new improvements")
-            print("  3. Generate visual timelines")
-            print("  4. Export to Excel and HTML dashboard")
-        else:  # both
-            print("This will:")
-            print("  1. Process new threads from Inbox")
-            print("  2. Regenerate summaries for existing threads")
-            print("  3. Generate visual timelines")
-            print("  4. Export to Excel and HTML dashboard")
-        print()
-        
-        confirm = input("Continue? (y/n): ").strip().lower()
-        if confirm != 'y':
-            print("Cancelled.")
-            return
+            # Get minimum emails threshold
+            print(f"Minimum emails per thread: {config.THREAD_MIN_EMAILS}")
+            print()
+            
+            # Get folder exclusions
+            print("Folder Exclusion:")
+            print("Enter folder names to exclude from thread processing (comma-separated)")
+            print("Example: Sent Items, Deleted Items, Archive")
+            print("Leave empty to process all folders")
+            excluded = input("Exclude folders: ").strip()
+            
+            excluded_folders = []
+            if excluded:
+                excluded_folders = [f.strip() for f in excluded.split(',')]
+                print(f"\nWill exclude: {', '.join(excluded_folders)}")
+            else:
+                print("\nNo folders excluded - processing all emails in Inbox")
+            
+            print()
+            
+            # Ask if user wants to reprocess existing threads
+            print("Process existing threads in 'Threads' folder?")
+            print("  - 'new': Only process new threads from Inbox (move to Threads folder)")
+            print("  - 'existing': Regenerate summaries for threads already in Threads folder")
+            print("  - 'both': Process both new and existing threads")
+            print()
+            
+            mode = input("Mode (new/existing/both) [default: new]: ").strip().lower()
+            if not mode:
+                mode = 'new'
+            
+            if mode not in ['new', 'existing', 'both']:
+                print("Invalid mode. Using 'new'.")
+                mode = 'new'
+            
+            print()
+            
+            # Confirmation
+            if mode == 'new':
+                print("This will:")
+                print("  1. Scan your Inbox for email threads")
+                print("  2. Move thread emails to 'Threads' folder")
+                print("  3. Create AI summaries for each thread")
+                print("  4. Generate visual timelines")
+                print("  5. Export to Excel and HTML dashboard")
+            elif mode == 'existing':
+                print("This will:")
+                print("  1. Scan 'Threads' folder for existing threads")
+                print("  2. Regenerate summaries with new improvements")
+                print("  3. Generate visual timelines")
+                print("  4. Export to Excel and HTML dashboard")
+            else:  # both
+                print("This will:")
+                print("  1. Process new threads from Inbox")
+                print("  2. Regenerate summaries for existing threads")
+                print("  3. Generate visual timelines")
+                print("  4. Export to Excel and HTML dashboard")
+            print()
+            
+            confirm = input("Continue? (y/n): ").strip().lower()
+            if confirm != 'y':
+                print("Cancelled.")
+                return
         
         # Store excluded folders in config for use by manager
         config.EXCLUDED_FOLDERS = excluded_folders

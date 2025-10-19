@@ -43,6 +43,11 @@ KEYWORDS_CUSTOMS = ["customs", "carinska", "border", "clearance"]
 TIMELINE_DATE_FORMAT = "%Y-%m-%d %H:%M"
 TIMELINE_OUTPUT_FORMAT = "png"  # or "html" for interactive
 
+# Developer Mode
+DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
+DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
+DEV_PROCESSING_MODE = "new"  # "new", "existing", or "both"
+
 # Excel Export
 EXPORT_TO_EXCEL = True
 EXCEL_FILE = OUTPUT_DIR / "thread_summary.xlsx"
