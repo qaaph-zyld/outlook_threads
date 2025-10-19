@@ -237,6 +237,60 @@ class TimelineGenerator:
             logger.error(f"Error generating interactive timeline: {e}")
             return False
     
+    def _clean_email_body(self, body: str) -> str:
+        """Clean email body by removing greetings and signatures"""
+        # Common greeting patterns to remove
+        greetings = [
+            'dear all', 'dear team', 'hi all', 'hello all', 'hi team', 'hello team',
+            'dear', 'hi', 'hello', 'good morning', 'good afternoon', 'good evening',
+            'greetings', 'hey'
+        ]
+        
+        # Common signature patterns to remove
+        signatures = [
+            'best regards', 'kind regards', 'regards', 'thank you', 'thanks',
+            'sincerely', 'cheers', 'best', 'br', 'rgds', 'thx',
+            'os melhores cumprimento', 'srdačan pozdrav', 'mit freundlichen grüßen',
+            'cordialement', 'saludos', 'atentamente'
+        ]
+        
+        # Split into lines
+        lines = body.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line_lower = line.strip().lower()
+            
+            # Skip empty lines
+            if not line_lower:
+                continue
+            
+            # Skip greeting lines (first few lines)
+            if len(cleaned_lines) < 2:
+                is_greeting = any(greeting in line_lower for greeting in greetings)
+                if is_greeting and len(line_lower) < 50:
+                    continue
+            
+            # Skip signature lines
+            is_signature = any(sig in line_lower for sig in signatures)
+            if is_signature and len(line_lower) < 50:
+                continue
+            
+            # Skip lines with only special characters or underscores
+            if all(c in '_ -=*#' for c in line_lower.replace(' ', '')):
+                continue
+            
+            cleaned_lines.append(line.strip())
+        
+        # Join and limit length
+        cleaned = ' '.join(cleaned_lines)
+        
+        # Remove multiple spaces
+        import re
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        
+        return cleaned.strip()
+    
     def _generate_text_timeline(self, thread_emails: List[Dict], summary: Dict, output_path: str) -> bool:
         """Generate text-based timeline (fallback)"""
         try:
@@ -249,16 +303,16 @@ class TimelineGenerator:
             
             for i, email in enumerate(sorted_emails, 1):
                 date_str = email['received_time'].strftime('%Y-%m-%d %H:%M')
-                timeline_text += f"{i}. [{date_str}] {email['sender']}\n"
-                timeline_text += f"   Subject: {email['subject']}\n"
+                timeline_text += f"[{date_str}] {email['sender']}\n"
                 
-                # Add snippet
-                body_snippet = email['body'][:150].replace('\n', ' ')
-                timeline_text += f"   {body_snippet}...\n\n"
+                # Clean and add body snippet
+                cleaned_body = self._clean_email_body(email['body'])
+                body_snippet = cleaned_body[:200] if len(cleaned_body) > 200 else cleaned_body
+                timeline_text += f"{body_snippet}\n\n"
             
             # Add metadata
             metadata = summary['metadata']
-            timeline_text += "\n" + "=" * 80 + "\n"
+            timeline_text += "=" * 80 + "\n"
             timeline_text += f"Total Emails: {metadata['email_count']}\n"
             timeline_text += f"Participants: {metadata['participant_count']}\n"
             timeline_text += f"Duration: {metadata['duration_days']} days\n"
