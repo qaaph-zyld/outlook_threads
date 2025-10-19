@@ -530,16 +530,19 @@ def main():
         config.EXCLUDED_FOLDERS = excluded_folders
         
         # Run
-        print("\nStarting thread processing...")
         manager = TransportThreadManager()
         
-        if mode == 'new':
-            manager.run(process_threads=True)
-        elif mode == 'existing':
-            manager.run_existing_threads()
-        else:  # both
-            manager.run(process_threads=True)
-            manager.run_existing_threads()
+        if mode == 'cached':
+            print("\n📂 Using cached summaries, skipping processing...")
+        else:
+            print("\nStarting thread processing...")
+            if mode == 'new':
+                manager.run(process_threads=True)
+            elif mode == 'existing':
+                manager.run_existing_threads()
+            else:  # both
+                manager.run(process_threads=True)
+                manager.run_existing_threads()
         
         # Interactive review mode (if enabled in developer mode or user wants it)
         if config.DEVELOPER_MODE and config.DEV_INTERACTIVE_REVIEW:
