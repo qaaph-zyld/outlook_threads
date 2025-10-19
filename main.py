@@ -162,7 +162,13 @@ class TransportThreadManager:
             logger.info(f"  - Duration: {metadata['duration_days']} days")
             
             # Check if thread should be archived (>2 months old)
-            days_since_last = (datetime.now() - metadata['end_date']).days
+            # Convert end_date from ISO string to datetime if needed
+            end_date = metadata['end_date']
+            if isinstance(end_date, str):
+                from dateutil import parser
+                end_date = parser.parse(end_date)
+            
+            days_since_last = (datetime.now() - end_date.replace(tzinfo=None)).days
             should_archive = days_since_last > config.ARCHIVE_THRESHOLD_DAYS
             
             if should_archive:
