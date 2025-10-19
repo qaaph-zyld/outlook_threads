@@ -405,7 +405,10 @@ class ThreadSummarizer:
         
         # Determine next action if not set
         if not insights['next_action']:
-            days_since_last = (datetime.now() - last_email['received_time']).days
+            last_received = last_email['received_time']
+            if hasattr(last_received, 'tzinfo') and last_received.tzinfo:
+                last_received = last_received.replace(tzinfo=None)
+            days_since_last = (datetime.now() - last_received).days
             if days_since_last > 7:
                 insights['next_action'] = f"Follow up - no activity for {days_since_last} days"
             elif insights['response_needed']:
@@ -504,6 +507,8 @@ class ThreadSummarizer:
             return "Unknown"
         
         last_email_date = sorted_emails[-1]['received_time']
+        if hasattr(last_email_date, 'tzinfo') and last_email_date.tzinfo:
+            last_email_date = last_email_date.replace(tzinfo=None)
         days_since = (datetime.now() - last_email_date).days
         
         if days_since == 0:
