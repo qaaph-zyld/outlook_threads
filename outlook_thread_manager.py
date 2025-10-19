@@ -308,6 +308,55 @@ class OutlookThreadManager:
         
         return metadata
     
+    def get_threads_from_folder(self) -> Dict[str, List[Dict]]:
+        """
+        Get all existing threads from the Threads folder
+        
+        Returns:
+            Dictionary mapping folder names to lists of email info dicts
+        """
+        try:
+            logger.info(f"Scanning Threads folder for existing threads...")
+            
+            threads = {}
+            
+            # Iterate through subfolders in Threads folder
+            for subfolder in self.threads_folder.Folders:
+                folder_name = subfolder.Name
+                logger.info(f"Found thread folder: {folder_name}")
+                
+                # Get emails from this subfolder
+                emails = []
+                items = subfolder.Items
+                items.Sort("[ReceivedTime]", False)
+                
+                for item in items:
+                    try:
+                        if item.Class == 43:  # olMail
+                            email_info = {
+                                'subject': item.Subject,
+                                'sender': item.SenderName if hasattr(item, 'SenderName') else 'Unknown',
+                                'received_time': item.ReceivedTime,
+                                'body': item.Body if hasattr(item, 'Body') else '',
+                                'has_attachments': item.Attachments.Count > 0,
+                                'attachment_count': item.Attachments.Count
+                            }
+                            emails.append(email_info)
+                    except Exception as e:
+                        logger.warning(f"Error reading email in {folder_name}: {e}")
+                        continue
+                
+                if emails:
+                    threads[folder_name] = emails
+                    logger.info(f"  - {len(emails)} emails in thread")
+            
+            logger.info(f"Found {len(threads)} existing threads")
+            return threads
+            
+        except Exception as e:
+            logger.error(f"Error getting threads from folder: {e}")
+            return {}
+    
     def cleanup(self):
         """Release Outlook resources"""
         try:

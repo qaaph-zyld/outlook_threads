@@ -106,6 +106,49 @@ class TransportThreadManager:
         finally:
             self.outlook_manager.cleanup()
     
+    def run_existing_threads(self):
+        """Process existing threads from the Threads folder"""
+        try:
+            logger.info("Processing existing threads from Threads folder...")
+            
+            # Get threads from Threads folder
+            threads = self.outlook_manager.get_threads_from_folder()
+            
+            if not threads:
+                logger.warning("No existing threads found in Threads folder")
+                return
+            
+            logger.info(f"Found {len(threads)} existing threads to reprocess")
+            
+            # Process each thread
+            for i, (folder_name, thread_emails) in enumerate(threads.items(), 1):
+                try:
+                    logger.info(f"\n--- Reprocessing Thread {i}/{len(threads)} ---")
+                    self._analyze_existing_thread(folder_name, thread_emails)
+                    self.stats['threads_processed'] += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error reprocessing thread {folder_name}: {e}")
+                    self.stats['errors'] += 1
+                    continue
+            
+            # Generate summary report
+            self._generate_summary_report()
+            
+            # Generate dashboard
+            dashboard_file = config.OUTPUT_DIR / "dashboard.html"
+            if self.dashboard.generate_html(dashboard_file):
+                logger.info(f"Dashboard generated: {dashboard_file}")
+            
+            logger.info("\n" + "=" * 80)
+            logger.info("REPROCESSING COMPLETE")
+            logger.info("=" * 80)
+            self._print_statistics()
+            
+        except Exception as e:
+            logger.error(f"Fatal error in reprocessing: {e}")
+            raise
+    
     def _process_thread(self, conv_id: str, thread_emails: list):
         """Process a single thread (move, summarize, visualize)"""
         try:
@@ -208,6 +251,56 @@ class TransportThreadManager:
             
         except Exception as e:
             logger.error(f"Error analyzing thread: {e}")
+    
+    def _analyze_existing_thread(self, folder_name: str, thread_emails: list):
+        """Analyze and regenerate summary for existing thread"""
+        try:
+            # Get metadata
+            metadata = self.outlook_manager.get_thread_metadata(thread_emails)
+            thread_name = metadata['thread_name']
+            
+            logger.info(f"Thread: {thread_name}")
+            logger.info(f"  - Emails: {len(thread_emails)}")
+            logger.info(f"  - Participants: {metadata['participant_count']}")
+            logger.info(f"  - Duration: {metadata['duration_days']} days")
+            
+            # Create local folder (reuse existing or create new)
+            local_folder = config.THREADS_DIR / folder_name
+            local_folder.mkdir(exist_ok=True, parents=True)
+            
+            # Generate summary
+            logger.info("Generating thread summary...")
+            summary = self.summarizer.summarize_thread(thread_emails, metadata)
+            
+            # Add to dashboard
+            self.dashboard.add_thread(summary)
+            
+            # Save summary as Markdown
+            summary_md = self.summarizer.format_summary_markdown(summary)
+            summary_file = local_folder / config.SUMMARY_FILE_NAME
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                f.write(summary_md)
+            logger.info(f"Summary saved to {summary_file}")
+            self.stats['summaries_created'] += 1
+            
+            # Save metadata as JSON
+            metadata_file = local_folder / config.METADATA_FILE_NAME
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                metadata_json = metadata.copy()
+                metadata_json['start_date'] = str(metadata_json['start_date'])
+                metadata_json['end_date'] = str(metadata_json['end_date'])
+                json.dump(metadata_json, f, indent=2, ensure_ascii=False)
+            logger.info(f"Metadata saved to {metadata_file}")
+            
+            # Generate timeline
+            logger.info("Generating timeline...")
+            timeline_path = str(local_folder / "timeline")
+            if self.timeline_generator.generate_timeline(thread_emails, summary, timeline_path):
+                logger.info(f"Timeline saved")
+                self.stats['timelines_created'] += 1
+            
+        except Exception as e:
+            logger.error(f"Error analyzing existing thread: {e}", exc_info=True)
     
     def _create_local_thread_folder(self, conv_id: str, thread_name: str) -> Path:
         """Create local folder for thread outputs"""
@@ -362,13 +455,43 @@ def main():
         
         print()
         
+        # Ask if user wants to reprocess existing threads
+        print("Process existing threads in 'Threads' folder?")
+        print("  - 'new': Only process new threads from Inbox (move to Threads folder)")
+        print("  - 'existing': Regenerate summaries for threads already in Threads folder")
+        print("  - 'both': Process both new and existing threads")
+        print()
+        
+        mode = input("Mode (new/existing/both) [default: new]: ").strip().lower()
+        if not mode:
+            mode = 'new'
+        
+        if mode not in ['new', 'existing', 'both']:
+            print("Invalid mode. Using 'new'.")
+            mode = 'new'
+        
+        print()
+        
         # Confirmation
-        print("This will:")
-        print("  1. Scan your Inbox for email threads")
-        print("  2. Move thread emails to 'Threads' folder")
-        print("  3. Create AI summaries for each thread")
-        print("  4. Generate visual timelines")
-        print("  5. Export to Excel")
+        if mode == 'new':
+            print("This will:")
+            print("  1. Scan your Inbox for email threads")
+            print("  2. Move thread emails to 'Threads' folder")
+            print("  3. Create AI summaries for each thread")
+            print("  4. Generate visual timelines")
+            print("  5. Export to Excel and HTML dashboard")
+        elif mode == 'existing':
+            print("This will:")
+            print("  1. Scan 'Threads' folder for existing threads")
+            print("  2. Regenerate summaries with new improvements")
+            print("  3. Generate visual timelines")
+            print("  4. Export to Excel and HTML dashboard")
+        else:  # both
+            print("This will:")
+            print("  1. Process new threads from Inbox")
+            print("  2. Regenerate summaries for existing threads")
+            print("  3. Generate visual timelines")
+            print("  4. Export to Excel and HTML dashboard")
         print()
         
         confirm = input("Continue? (y/n): ").strip().lower()
@@ -382,7 +505,14 @@ def main():
         # Run
         print("\nStarting thread processing...")
         manager = TransportThreadManager()
-        manager.run(process_threads=True)
+        
+        if mode == 'new':
+            manager.run(process_threads=True)
+        elif mode == 'existing':
+            manager.run_existing_threads()
+        else:  # both
+            manager.run(process_threads=True)
+            manager.run_existing_threads()
         
         print("\n" + "=" * 80)
         print("DONE! Check the output folder for results:")
