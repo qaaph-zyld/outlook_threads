@@ -48,7 +48,7 @@ TIMELINE_OUTPUT_FORMAT = "png"  # or "html" for interactive
 # Developer Mode
 DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
 DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
-DEV_PROCESSING_MODE = "new"  # "new", "existing", or "both"
+DEV_PROCESSING_MODE = "existing"  # "new", "existing", or "both"
 DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
 
 # Excel Export

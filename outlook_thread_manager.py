@@ -339,7 +339,8 @@ class OutlookThreadManager:
                                 'received_time': item.ReceivedTime,
                                 'body': item.Body if hasattr(item, 'Body') else '',
                                 'has_attachments': item.Attachments.Count > 0,
-                                'attachment_count': item.Attachments.Count
+                                'attachment_count': item.Attachments.Count,
+                                'conversation_id': item.ConversationID if hasattr(item, 'ConversationID') else folder_name
                             }
                             emails.append(email_info)
                     except Exception as e:
