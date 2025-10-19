@@ -523,7 +523,10 @@ class ThreadSummarizer:
         try:
             sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
             insights = self._extract_conversation_insights(sorted_emails)
-        except:
+            priority = self._calculate_priority_score(sorted_emails, metadata)
+            reply_template = self._generate_reply_template(insights, metadata)
+        except Exception as e:
+            logger.warning(f"Error in fallback summary generation: {e}")
             insights = {
                 'conversation_flow': [],
                 'key_points': [],
@@ -532,6 +535,8 @@ class ThreadSummarizer:
                 'waiting_on': None,
                 'last_responder': None
             }
+            priority = {'score': 0, 'priority': 'Low', 'factors': []}
+            reply_template = "No response required at this time."
         
         return {
             'method': 'fallback',
@@ -543,7 +548,9 @@ class ThreadSummarizer:
             'action_items': [],
             'current_status': 'Unable to analyze',
             'issues_risks': [],
-            'conversation_insights': insights
+            'conversation_insights': insights,
+            'priority': priority,
+            'reply_template': reply_template
         }
     
     def format_summary_markdown(self, summary: Dict) -> str:

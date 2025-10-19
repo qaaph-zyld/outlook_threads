@@ -69,6 +69,10 @@ class TimelineGenerator:
     def _generate_static_timeline(self, thread_emails: List[Dict], summary: Dict, output_path: str) -> bool:
         """Generate static timeline using Matplotlib"""
         try:
+            if not summary:
+                logger.warning("No summary provided for timeline generation")
+                return False
+            
             # Sort emails by date
             sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
             

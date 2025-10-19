@@ -8,11 +8,13 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
 THREADS_DIR = OUTPUT_DIR / "threads"
+ARCHIVE_DIR = OUTPUT_DIR / "archive"
 LOGS_DIR = OUTPUT_DIR / "logs"
 
 # Create directories if they don't exist
 OUTPUT_DIR.mkdir(exist_ok=True)
 THREADS_DIR.mkdir(exist_ok=True)
+ARCHIVE_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # Outlook Configuration
@@ -47,6 +49,7 @@ TIMELINE_OUTPUT_FORMAT = "png"  # or "html" for interactive
 DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
 DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
 DEV_PROCESSING_MODE = "new"  # "new", "existing", or "both"
+DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
 
 # Excel Export
 EXPORT_TO_EXCEL = True

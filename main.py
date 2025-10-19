@@ -192,8 +192,8 @@ class TransportThreadManager:
             )
             self.stats['emails_moved'] += moved_count
             
-            # Create local folder for outputs
-            local_folder = self._create_local_thread_folder(conv_id, thread_name)
+            # Create local folder for outputs (in threads or archive)
+            local_folder = self._create_local_thread_folder(conv_id, thread_name, archive=should_archive)
             
             # Generate summary
             logger.info("Generating thread summary...")
@@ -308,14 +308,15 @@ class TransportThreadManager:
         except Exception as e:
             logger.error(f"Error analyzing existing thread: {e}", exc_info=True)
     
-    def _create_local_thread_folder(self, conv_id: str, thread_name: str) -> Path:
+    def _create_local_thread_folder(self, conv_id: str, thread_name: str, archive: bool = False) -> Path:
         """Create local folder for thread outputs"""
         # Clean folder name
         clean_name = self.outlook_manager._clean_folder_name(thread_name)
         folder_name = f"{clean_name[:50]}_{conv_id[:8]}"
         
-        # Create folder
-        folder_path = config.THREADS_DIR / folder_name
+        # Create folder in threads or archive
+        base_dir = config.ARCHIVE_DIR if archive else config.THREADS_DIR
+        folder_path = base_dir / folder_name
         folder_path.mkdir(exist_ok=True, parents=True)
         
         return folder_path
