@@ -50,6 +50,8 @@ DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
 DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
 DEV_PROCESSING_MODE = "existing"  # "new", "existing", or "both"
 DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
+DEV_USE_CACHED_SUMMARIES = True  # Use existing summaries instead of regenerating
+DEV_INTERACTIVE_REVIEW = True  # Enable interactive review mode after processing
 
 # Excel Export
 EXPORT_TO_EXCEL = True

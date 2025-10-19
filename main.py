@@ -11,6 +11,7 @@ from outlook_thread_manager import OutlookThreadManager
 from thread_summarizer import ThreadSummarizer
 from timeline_generator import TimelineGenerator
 from dashboard_generator import DashboardGenerator
+from interactive_review import InteractiveReviewer
 
 # Configure logging
 logging.basicConfig(
@@ -539,6 +540,22 @@ def main():
         else:  # both
             manager.run(process_threads=True)
             manager.run_existing_threads()
+        
+        # Interactive review mode (if enabled in developer mode or user wants it)
+        if config.DEVELOPER_MODE and config.DEV_INTERACTIVE_REVIEW:
+            print("\n" + "=" * 80)
+            print("🔍 STARTING INTERACTIVE REVIEW MODE")
+            print("=" * 80)
+            
+            reviewer = InteractiveReviewer(manager.outlook_manager)
+            review_stats = reviewer.review_threads()
+            
+            print("\n" + "=" * 80)
+            print("REVIEW COMPLETE")
+            print(f"  - Threads reviewed: {review_stats['reviewed']}")
+            print(f"  - Drafts created: {review_stats['drafts']}")
+            print(f"  - Threads skipped: {review_stats['skipped']}")
+            print("=" * 80)
         
         print("\n" + "=" * 80)
         print("DONE! Check the output folder for results:")

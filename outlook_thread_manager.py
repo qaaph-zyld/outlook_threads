@@ -358,6 +358,105 @@ class OutlookThreadManager:
             logger.error(f"Error getting threads from folder: {e}")
             return {}
     
+    def create_draft_reply(self, subject: str, body: str, thread_name: str):
+        """
+        Create a draft reply email in Outlook
+        
+        Args:
+            subject: Email subject
+            body: Email body
+            thread_name: Name of the thread (to find original emails)
+            
+        Returns:
+            Draft MailItem object or None
+        """
+        try:
+            # Create new mail item
+            draft = self.outlook.CreateItem(0)  # 0 = olMailItem
+            draft.Subject = subject
+            draft.Body = body
+            
+            # Try to find the thread folder and get the last email
+            try:
+                thread_folder = self._find_thread_folder(thread_name)
+                if thread_folder:
+                    items = thread_folder.Items
+                    items.Sort("[ReceivedTime]", True)  # Sort descending
+                    
+                    if items.Count > 0:
+                        last_email = items.GetFirst()
+                        
+                        # Copy recipients from last email
+                        if hasattr(last_email, 'SenderEmailAddress'):
+                            draft.To = last_email.SenderEmailAddress
+                        
+                        # Copy CC if any
+                        if hasattr(last_email, 'CC') and last_email.CC:
+                            draft.CC = last_email.CC
+            except Exception as e:
+                logger.warning(f"Could not link draft to original thread: {e}")
+            
+            # Save draft (don't send)
+            draft.Save()
+            logger.info(f"Draft created: {subject}")
+            return draft
+            
+        except Exception as e:
+            logger.error(f"Error creating draft: {e}")
+            return None
+    
+    def _find_thread_folder(self, thread_name: str):
+        """Find a thread subfolder by name"""
+        try:
+            if not self.threads_folder:
+                return None
+            
+            folders = self.threads_folder.Folders
+            for folder in folders:
+                if thread_name in folder.Name:
+                    return folder
+            return None
+        except Exception as e:
+            logger.warning(f"Error finding thread folder: {e}")
+            return None
+    
+    def flag_thread_for_followup(self, thread_name: str) -> bool:
+        """
+        Flag all emails in a thread for follow-up
+        
+        Args:
+            thread_name: Name of the thread
+            
+        Returns:
+            True if successful
+        """
+        try:
+            thread_folder = self._find_thread_folder(thread_name)
+            if not thread_folder:
+                logger.warning(f"Thread folder not found: {thread_name}")
+                return False
+            
+            items = thread_folder.Items
+            flagged_count = 0
+            
+            for item in items:
+                try:
+                    if item.Class == 43:  # olMail
+                        item.FlagRequest = "Follow up"
+                        item.FlagStatus = 2  # olFlagMarked
+                        item.Save()
+                        flagged_count += 1
+                except Exception as e:
+                    logger.warning(f"Error flagging email: {e}")
+                    continue
+            
+            logger.info(f"Flagged {flagged_count} emails in thread: {thread_name}")
+            return flagged_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error flagging thread: {e}")
+            return False
+    
     def cleanup(self):
         """Release Outlook resources"""
         try:
