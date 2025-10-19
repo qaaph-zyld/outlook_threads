@@ -17,7 +17,7 @@ class DashboardGenerator:
         """Initialize dashboard generator"""
         self.threads_data = []
     
-    def add_thread(self, summary: Dict):
+    def add_thread(self, summary: Dict, is_archived: bool = False):
         """Add a thread summary to the dashboard data"""
         try:
             metadata = summary.get('metadata', {})
@@ -39,6 +39,7 @@ class DashboardGenerator:
                 'has_delay': metadata.get('has_delay', False),
                 'is_transport': metadata.get('is_transport', False),
                 'is_customs': metadata.get('is_customs', False),
+                'is_archived': is_archived,
             }
             
             self.threads_data.append(thread_data)
@@ -49,20 +50,23 @@ class DashboardGenerator:
     def generate_html(self, output_path: Path) -> bool:
         """Generate HTML dashboard"""
         try:
-            # Calculate statistics
-            total_threads = len(self.threads_data)
+            # Filter out archived threads for dashboard display
+            active_threads = [t for t in self.threads_data if not t.get('is_archived', False)]
+            
+            # Calculate statistics (only for active threads)
+            total_threads = len(active_threads)
             if total_threads == 0:
-                logger.warning("No threads to generate dashboard")
+                logger.warning("No active threads to generate dashboard")
                 return False
             
-            response_needed_count = sum(1 for t in self.threads_data if t['response_needed'])
-            critical_count = sum(1 for t in self.threads_data if t['priority_level'] == 'Critical')
-            high_count = sum(1 for t in self.threads_data if t['priority_level'] == 'High')
-            urgent_count = sum(1 for t in self.threads_data if t['is_urgent'])
-            delay_count = sum(1 for t in self.threads_data if t['has_delay'])
+            response_needed_count = sum(1 for t in active_threads if t['response_needed'])
+            critical_count = sum(1 for t in active_threads if t['priority_level'] == 'Critical')
+            high_count = sum(1 for t in active_threads if t['priority_level'] == 'High')
+            urgent_count = sum(1 for t in active_threads if t['is_urgent'])
+            delay_count = sum(1 for t in active_threads if t['has_delay'])
             
             # Sort threads by priority score
-            sorted_threads = sorted(self.threads_data, key=lambda x: x['priority_score'], reverse=True)
+            sorted_threads = sorted(active_threads, key=lambda x: x['priority_score'], reverse=True)
             
             # Generate HTML
             html = self._generate_html_content(

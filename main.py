@@ -199,8 +199,8 @@ class TransportThreadManager:
             logger.info("Generating thread summary...")
             summary = self.summarizer.summarize_thread(thread_emails, metadata)
             
-            # Add to dashboard
-            self.dashboard.add_thread(summary)
+            # Add to dashboard (mark as archived if old)
+            self.dashboard.add_thread(summary, is_archived=should_archive)
             
             # Save summary as Markdown
             summary_md = self.summarizer.format_summary_markdown(summary)
@@ -270,6 +270,14 @@ class TransportThreadManager:
             logger.info(f"  - Participants: {metadata['participant_count']}")
             logger.info(f"  - Duration: {metadata['duration_days']} days")
             
+            # Check if thread should be archived (>60 days old)
+            end_date = metadata['end_date']
+            if isinstance(end_date, str):
+                from dateutil import parser
+                end_date = parser.parse(end_date)
+            days_since_last = (datetime.now() - end_date.replace(tzinfo=None)).days
+            should_archive = days_since_last > config.ARCHIVE_THRESHOLD_DAYS
+            
             # Create local folder (reuse existing or create new)
             local_folder = config.THREADS_DIR / folder_name
             local_folder.mkdir(exist_ok=True, parents=True)
@@ -278,8 +286,8 @@ class TransportThreadManager:
             logger.info("Generating thread summary...")
             summary = self.summarizer.summarize_thread(thread_emails, metadata)
             
-            # Add to dashboard
-            self.dashboard.add_thread(summary)
+            # Add to dashboard (mark as archived if old)
+            self.dashboard.add_thread(summary, is_archived=should_archive)
             
             # Save summary as Markdown
             summary_md = self.summarizer.format_summary_markdown(summary)

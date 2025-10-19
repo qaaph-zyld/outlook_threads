@@ -281,7 +281,10 @@ class ThreadSummarizer:
             factors.append("Response/action required")
         
         # Factor 3: Recent activity (+20 points if < 2 days)
-        days_since_last = (datetime.now() - last_email['received_time']).days
+        received_time = last_email['received_time']
+        if hasattr(received_time, 'tzinfo') and received_time.tzinfo:
+            received_time = received_time.replace(tzinfo=None)
+        days_since_last = (datetime.now() - received_time).days
         if days_since_last < 2:
             score += 20
             factors.append("Recent activity (< 2 days)")
