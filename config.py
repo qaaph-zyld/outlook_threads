@@ -52,6 +52,7 @@ DEV_PROCESSING_MODE = "cached"  # "new", "existing", "both", or "cached" (skip p
 DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
 DEV_USE_CACHED_SUMMARIES = True  # Use existing summaries instead of regenerating
 DEV_INTERACTIVE_REVIEW = True  # Enable interactive review mode after processing
+DEV_REVIEW_UI = "gui"  # "console" or "gui"
 
 # Excel Export
 EXPORT_TO_EXCEL = True
