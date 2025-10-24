@@ -3,9 +3,11 @@ Transport Thread Manager - Main Application
 Automatically organizes, analyzes, and visualizes email threads for transport coordination
 """
 import logging
+from logging.handlers import RotatingFileHandler
 import json
 from pathlib import Path
 from datetime import datetime
+import shutil
 import config
 from outlook_thread_manager import OutlookThreadManager
 from thread_summarizer import ThreadSummarizer
@@ -13,6 +15,7 @@ from timeline_generator import TimelineGenerator
 from dashboard_generator import DashboardGenerator
 from interactive_review import InteractiveReviewer
 from gui_review import start_gui_review
+from task_runner_gui import start_task_runner
 
 # Configure logging
 try:
@@ -20,11 +23,12 @@ try:
     _stream_handler = RichHandler()
 except Exception:
     _stream_handler = logging.StreamHandler()
+_file_handler = RotatingFileHandler(filename=str(config.LOG_FILE), maxBytes=2*1024*1024, backupCount=5, encoding='utf-8')
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(config.LOG_FILE, encoding='utf-8'),
+        _file_handler,
         _stream_handler
     ]
 )
@@ -290,8 +294,16 @@ class TransportThreadManager:
             days_since_last = (datetime.now() - end_date.replace(tzinfo=None)).days
             should_archive = days_since_last > config.ARCHIVE_THRESHOLD_DAYS
             
-            # Create local folder (reuse existing or create new)
-            local_folder = config.THREADS_DIR / folder_name
+            # Create local folder (reuse existing or create new) and move if archiving
+            target_base = config.ARCHIVE_DIR if should_archive else config.THREADS_DIR
+            local_folder = target_base / folder_name
+            try:
+                other_base = config.THREADS_DIR if should_archive else config.ARCHIVE_DIR
+                other_path = other_base / folder_name
+                if other_path.exists() and not local_folder.exists():
+                    shutil.move(str(other_path), str(local_folder))
+            except Exception:
+                pass
             local_folder.mkdir(exist_ok=True, parents=True)
             
             # Generate summary
@@ -566,9 +578,12 @@ def main():
             print("🔍 STARTING INTERACTIVE REVIEW MODE")
             print("=" * 80)
             
-            if getattr(config, 'DEV_REVIEW_UI', 'console') == 'gui':
+            ui = getattr(config, 'DEV_REVIEW_UI', 'console')
+            if ui == 'gui':
                 # Launch Tkinter GUI review
                 start_gui_review(manager.outlook_manager)
+            elif ui == 'runner':
+                start_task_runner(manager.outlook_manager)
             else:
                 # Console review
                 reviewer = InteractiveReviewer(manager.outlook_manager)

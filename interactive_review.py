@@ -5,6 +5,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
+from datetime import datetime
+from dateutil import parser
 import config
 
 logger = logging.getLogger(__name__)
@@ -105,6 +107,17 @@ class InteractiveReviewer:
                     response_needed or
                     metadata.get('is_urgent', False)
                 )
+
+                try:
+                    end_date = metadata.get('end_date')
+                    if isinstance(end_date, str):
+                        end_date = parser.parse(end_date)
+                    if end_date:
+                        days_since = (datetime.now() - end_date.replace(tzinfo=None)).days
+                        if days_since > config.ARCHIVE_THRESHOLD_DAYS:
+                            continue
+                except Exception:
+                    pass
                 
                 threads.append({
                     'folder': thread_folder,

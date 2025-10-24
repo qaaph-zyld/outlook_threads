@@ -14,6 +14,8 @@ from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
 from pathlib import Path
 from typing import List, Dict
+from datetime import datetime
+from dateutil import parser
 
 import config
 from interactive_review import InteractiveReviewer
@@ -47,6 +49,7 @@ class GUIReviewer:
 
         self.search_var = tk.StringVar()
         self.only_attention_var = tk.BooleanVar(value=True)
+        self.only_recent_var = tk.BooleanVar(value=True)
 
         ttk.Label(top, text="Search:").pack(side=tk.LEFT)
         search_entry = ttk.Entry(top, textvariable=self.search_var, width=40)
@@ -55,6 +58,8 @@ class GUIReviewer:
 
         ttk.Checkbutton(top, text="Only requiring attention", variable=self.only_attention_var,
                         command=self._apply_filters).pack(side=tk.LEFT)
+        ttk.Checkbutton(top, text="Only recent activity", variable=self.only_recent_var,
+                        command=self._apply_filters).pack(side=tk.LEFT, padx=(8, 0))
 
         ttk.Button(top, text="Refresh", command=self._load_threads_async).pack(side=tk.LEFT, padx=(12, 0))
         ttk.Button(top, text="Open Drafts", command=self._open_drafts).pack(side=tk.LEFT, padx=(6, 0))
@@ -144,10 +149,23 @@ class GUIReviewer:
     def _apply_filters(self):
         term = self.search_var.get().strip().lower()
         only_attention = self.only_attention_var.get()
+        only_recent = self.only_recent_var.get()
 
         def matches(t: Dict) -> bool:
             if only_attention and not t.get('requires_attention', False):
                 return False
+            if only_recent:
+                md = t.get('metadata', {})
+                end_date = md.get('end_date')
+                try:
+                    if isinstance(end_date, str):
+                        end_date = parser.parse(end_date)
+                    if end_date:
+                        days_since = (datetime.now() - end_date.replace(tzinfo=None)).days
+                        if days_since > config.ARCHIVE_THRESHOLD_DAYS:
+                            return False
+                except Exception:
+                    pass
             if not term:
                 return True
             name = t.get('name', '').lower()

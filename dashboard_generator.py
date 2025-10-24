@@ -95,6 +95,9 @@ class DashboardGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transport Thread Manager - Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/2.1.8/js/dataTables.min.js"></script>
     <style>
         * {{
             margin: 0;
@@ -360,7 +363,66 @@ class DashboardGenerator:
         
         html += """
         </div>
+        
+        <div class="threads-section" style="margin-top:20px;">
+            <h2>📊 Table View (Sortable)</h2>
+            <table id="threadsTable" class="display" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Priority</th>
+                        <th>Level</th>
+                        <th>Emails</th>
+                        <th>Participants</th>
+                        <th>Duration (days)</th>
+                        <th>Flags</th>
+                        <th>Next Action</th>
+                        <th>Response Needed</th>
+                        <th>Dates</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        for thread in threads:
+            flags = []
+            if thread['response_needed']:
+                flags.append('RESPONSE')
+            if thread['is_urgent']:
+                flags.append('URGENT')
+            if thread['has_delay']:
+                flags.append('DELAY')
+            if thread['is_transport']:
+                flags.append('TRANSPORT')
+            if thread['is_customs']:
+                flags.append('CUSTOMS')
+            flags_text = ' | '.join(flags)
+            dates = f"{thread['start_date']} → {thread['end_date']}"
+            html += f"""
+                <tr>
+                    <td>{thread['name']}</td>
+                    <td>{thread['priority_score']}</td>
+                    <td>{thread['priority_level']}</td>
+                    <td>{thread['emails']}</td>
+                    <td>{thread['participants']}</td>
+                    <td>{thread['duration_days']}</td>
+                    <td>{flags_text}</td>
+                    <td>{thread['next_action']}</td>
+                    <td>{'Yes' if thread['response_needed'] else 'No'}</td>
+                    <td>{dates}</td>
+                </tr>
+            """
+        html += """
+                </tbody>
+            </table>
+        </div>
     </div>
+    <script>
+    const dt = new DataTable('#threadsTable', {
+        pageLength: 25,
+        order: [[1, 'desc']],
+        responsive: true
+    });
+    </script>
 </body>
 </html>
 """
