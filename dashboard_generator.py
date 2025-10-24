@@ -2,10 +2,12 @@
 Dashboard Generator - Creates HTML dashboard for thread overview
 """
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
 import json
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +19,18 @@ class DashboardGenerator:
         """Initialize dashboard generator"""
         self.threads_data = []
     
-    def add_thread(self, summary: Dict, is_archived: bool = False):
+    def add_thread(self, summary: Dict, is_archived: bool = False, folder_path: Path = None):
         """Add a thread summary to the dashboard data"""
         try:
             metadata = summary.get('metadata', {})
             priority = summary.get('priority', {'score': 0, 'priority': 'Low', 'factors': []})
             insights = summary.get('conversation_insights', {})
+            folder_rel = None
+            if folder_path:
+                try:
+                    folder_rel = os.path.relpath(str(folder_path), start=str(config.OUTPUT_DIR))
+                except Exception:
+                    folder_rel = str(folder_path)
             
             thread_data = {
                 'name': summary.get('thread_name', 'Unknown'),
@@ -40,6 +48,7 @@ class DashboardGenerator:
                 'is_transport': metadata.get('is_transport', False),
                 'is_customs': metadata.get('is_customs', False),
                 'is_archived': is_archived,
+                'folder_rel': folder_rel,
             }
             
             self.threads_data.append(thread_data)
@@ -325,6 +334,18 @@ class DashboardGenerator:
         # Add thread cards
         for thread in threads:
             priority_class = f"priority-{thread['priority_level'].lower()}"
+            # Links
+            links_html = ""
+            if thread.get('folder_rel'):
+                base = thread['folder_rel']
+                sum_link = f"{base}/{config.SUMMARY_FILE_NAME}"
+                tl_html = f"{base}/{config.TIMELINE_FILE_NAME}.html"
+                tl_png = f"{base}/{config.TIMELINE_FILE_NAME}.png"
+                flow_net = f"{base}/flow_network.html"
+                flow_sankey = f"{base}/flow_sankey.html"
+                links_html = f"<a href='{sum_link}' target='_blank'>Summary</a> | " \
+                             f"<a href='{tl_html}' target='_blank'>Timeline</a> | " \
+                             f"<a href='{flow_net}' target='_blank'>Flow</a>"
             
             flags_html = ""
             if thread['response_needed']:
@@ -358,6 +379,7 @@ class DashboardGenerator:
                 <div class="next-action">
                     <strong>Next Action:</strong> {thread['next_action']}
                 </div>
+                {f"<div style='margin-top:6px;font-size:14px;'>🔗 {links_html}</div>" if links_html else ''}
             </div>
 """
         
@@ -397,6 +419,13 @@ class DashboardGenerator:
                 flags.append('CUSTOMS')
             flags_text = ' | '.join(flags)
             dates = f"{thread['start_date']} → {thread['end_date']}"
+            links_text = ''
+            if thread.get('folder_rel'):
+                base = thread['folder_rel']
+                sum_link = f"{base}/{config.SUMMARY_FILE_NAME}"
+                tl_html = f"{base}/{config.TIMELINE_FILE_NAME}.html"
+                flow_net = f"{base}/flow_network.html"
+                links_text = f"<a href='{sum_link}' target='_blank'>Summary</a> | <a href='{tl_html}' target='_blank'>Timeline</a> | <a href='{flow_net}' target='_blank'>Flow</a>"
             html += f"""
                 <tr>
                     <td>{thread['name']}</td>
@@ -408,7 +437,7 @@ class DashboardGenerator:
                     <td>{flags_text}</td>
                     <td>{thread['next_action']}</td>
                     <td>{'Yes' if thread['response_needed'] else 'No'}</td>
-                    <td>{dates}</td>
+                    <td>{dates}<br>{links_text}</td>
                 </tr>
             """
         html += """

@@ -95,6 +95,15 @@ class InteractiveReviewer:
                 if summary_file.exists():
                     with open(summary_file, 'r', encoding='utf-8') as f:
                         summary_text = f.read()
+                # Load triage if present
+                triage = {}
+                triage_file = thread_folder / 'triage.json'
+                if triage_file.exists():
+                    try:
+                        with open(triage_file, 'r', encoding='utf-8') as tf:
+                            triage = json.load(tf)
+                    except Exception:
+                        triage = {}
                 
                 # Extract priority and reply template from summary
                 priority_score = self._extract_priority_score(summary_text)
@@ -105,7 +114,9 @@ class InteractiveReviewer:
                 requires_attention = (
                     priority_score >= 40 or  # Medium+ priority
                     response_needed or
-                    metadata.get('is_urgent', False)
+                    metadata.get('is_urgent', False) or
+                    (triage.get('due_soon') is True) or
+                    (triage.get('escalate') is True)
                 )
 
                 try:
@@ -127,7 +138,9 @@ class InteractiveReviewer:
                     'priority_score': priority_score,
                     'reply_template': reply_template,
                     'response_needed': response_needed,
-                    'requires_attention': requires_attention
+                    'requires_attention': requires_attention,
+                    'triage': triage,
+                    'triage_actions': triage.get('actions', []) if isinstance(triage, dict) else []
                 })
             
             except Exception as e:
@@ -236,61 +249,6 @@ class InteractiveReviewer:
         else:
             print("   Invalid choice, skipping...")
             self.threads_skipped += 1
-    
-    def _suggest_actions(self, thread: Dict) -> List[str]:
-        """Suggest actions based on thread analysis"""
-        actions = []
-        metadata = thread['metadata']
-        
-        if thread['response_needed']:
-            actions.append("Reply to last email (template available)")
-        
-        if metadata.get('is_urgent'):
-            actions.append("Urgent: Prioritize immediate response")
-        
-        if metadata.get('has_delay'):
-            actions.append("Address delay concerns mentioned in thread")
-        
-        if thread['priority_score'] >= 60:
-            actions.append("High priority: Schedule time to handle today")
-        
-        if metadata.get('duration_days', 0) > 7:
-            actions.append("Long-running thread: Consider escalation or closure")
-        
-        if not actions:
-            actions.append("Monitor for updates")
-        
-        return actions
-    
-    def _create_draft(self, thread: Dict):
-        """Create draft email in Outlook"""
-        try:
-            print("\n   📝 Creating draft...")
-            
-            # Get reply template
-            template = thread.get('reply_template', '')
-            if not template:
-                template = self._generate_basic_template(thread)
-            
-            # Extract subject
-            subject = f"Re: {thread['name']}"
-            
-            # Create draft in Outlook
-            draft = self.outlook_manager.create_draft_reply(
-                subject=subject,
-                body=template,
-                thread_name=thread['name']
-            )
-            
-            if draft:
-                self.drafts_created.append(draft)
-                print(f"   ✅ Draft created successfully!")
-            else:
-                print(f"   ❌ Failed to create draft")
-        
-        except Exception as e:
-            logger.error(f"Error creating draft: {e}")
-            print(f"   ❌ Error creating draft: {e}")
     
     def _generate_basic_template(self, thread: Dict) -> str:
         """Generate basic reply template if none exists"""

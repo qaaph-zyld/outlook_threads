@@ -29,8 +29,11 @@ SCAN_DAYS = 60
 # AI Configuration (HuggingFace - Local, No API Key Needed!)
 # Uses transformers library with local models
 # First run will download model (~500MB), then cached locally
-USE_AI_SUMMARIZATION = True  # Set to False to use only rule-based summaries
+USE_AI_SUMMARIZATION = False  # Set to False to use only rule-based summaries
 AI_MODEL = "sshleifer/distilbart-cnn-12-6"  # Smaller, faster model
+AI_LOCAL_ONLY = False
+AI_LOCAL_MODEL_DIR = BASE_DIR / "models" / "distilbart-cnn-12-6"
+HF_HOME = OUTPUT_DIR / "hf_cache"
 
 # Logging
 LOG_FILE = LOGS_DIR / "thread_manager.log"
@@ -46,6 +49,7 @@ KEYWORDS_CUSTOMS = ["customs", "carinska", "border", "clearance"]
 TIMELINE_DATE_FORMAT = "%Y-%m-%d %H:%M"
 TIMELINE_OUTPUT_FORMAT = "html"  # or "html" for interactive
 TIMELINE_GANTT_ENABLED = True
+FLOW_GRAPH_ENABLED = True
 
 # Developer Mode
 DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults

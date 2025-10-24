@@ -6,8 +6,12 @@ import logging
 from typing import List, Dict, Optional
 import json
 import re
-from datetime import datetime
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
 import config
+import math
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -24,26 +28,52 @@ except ImportError:
 class ThreadSummarizer:
     """Summarizes email threads using HuggingFace AI or rule-based methods"""
     
-    def __init__(self, use_ai: bool = True):
+    def __init__(self, use_ai: bool = None):
         """
         Initialize summarizer
         
         Args:
-            use_ai: Whether to use AI (HuggingFace). Defaults to True.
+            use_ai: Whether to use AI (HuggingFace). If None, uses config.USE_AI_SUMMARIZATION.
         """
-        self.use_ai = use_ai
+        self.use_ai = (config.USE_AI_SUMMARIZATION if use_ai is None else use_ai)
         self.summarizer = None
         
+        # Configure HF cache/home for reliability
+        try:
+            hf_home = getattr(config, 'HF_HOME', None)
+            if hf_home:
+                os.environ.setdefault('HF_HOME', str(hf_home))
+        except Exception:
+            pass
+
+        # Determine local-only mode and model location
+        local_model_dir = None
+        try:
+            candidate = getattr(config, 'AI_LOCAL_MODEL_DIR', None)
+            if candidate:
+                candidate_path = Path(candidate)
+                if candidate_path.exists():
+                    local_model_dir = candidate_path
+        except Exception:
+            pass
+
+        local_only = bool(getattr(config, 'AI_LOCAL_ONLY', False) or local_model_dir)
+        if local_only:
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+
         if self.use_ai and TRANSFORMERS_AVAILABLE:
             try:
                 logger.info("Loading HuggingFace summarization model (first run may take a moment to download)...")
                 # Use a smaller, efficient model for summarization
                 # facebook/bart-large-cnn is good for summaries
                 # Alternative: sshleifer/distilbart-cnn-12-6 (smaller, faster)
+                model_id = str(local_model_dir) if local_model_dir else getattr(config, 'AI_MODEL', "sshleifer/distilbart-cnn-12-6")
                 self.summarizer = pipeline(
                     "summarization",
-                    model="sshleifer/distilbart-cnn-12-6",  # Smaller model, faster
-                    device=0 if torch.cuda.is_available() else -1  # Use GPU if available
+                    model=model_id,
+                    device=0 if torch.cuda.is_available() else -1,  # Use GPU if available
+                    framework='pt',
+                    local_files_only=local_only
                 )
                 logger.info("HuggingFace summarizer initialized successfully")
             except Exception as e:
@@ -138,17 +168,24 @@ class ThreadSummarizer:
             issues = self._extract_issues(sorted_emails)
             insights = self._extract_conversation_insights(sorted_emails)
             priority = self._calculate_priority_score(sorted_emails, metadata)
+            # Extractive summary from recent sentences
+            extractive = self._extractive_summary(sorted_emails)
             
             # Create executive summary
             exec_summary = self._create_executive_summary(
                 metadata, events, stakeholders, issues
             )
+            if extractive:
+                exec_summary = exec_summary + " " + " ".join(extractive[:3])
             
             # Determine current status
             current_status = self._determine_status(sorted_emails, metadata)
             
             # Generate reply template if response needed
             reply_template = self._generate_reply_template(insights, metadata)
+            
+            # Build triage (actions, due dates, escalation)
+            triage = self._build_triage(sorted_emails, metadata, insights, issues)
             
             summary = {
                 'method': 'rule_based',
@@ -162,7 +199,8 @@ class ThreadSummarizer:
                 'issues_risks': issues,
                 'conversation_insights': insights,
                 'priority': priority,
-                'reply_template': reply_template
+                'reply_template': reply_template,
+                'triage': triage
             }
             
             logger.info(f"Rule-based summary generated for thread: {metadata['thread_name']}")
@@ -551,7 +589,7 @@ class ThreadSummarizer:
             'thread_name': metadata['thread_name'],
             'metadata': metadata,
             'executive_summary': f"Thread with {metadata['email_count']} emails",
-            'key_events': [f"Thread started {metadata['start_date']}"],
+            'key_events': [f"Thread started {metadata['start_date']}"] ,
             'stakeholders': metadata['participants'],
             'action_items': [],
             'current_status': 'Unable to analyze',
@@ -560,6 +598,200 @@ class ThreadSummarizer:
             'priority': priority,
             'reply_template': reply_template
         }
+
+    def _extractive_summary(self, sorted_emails: List[Dict]) -> List[str]:
+        """Build an extractive summary using simple TF-IDF + MMR over recent sentences"""
+        # Collect sentences from last 6 emails (favor recency)
+        recent = sorted_emails[-6:] if len(sorted_emails) > 6 else sorted_emails
+        sentences = []
+        for em in recent:
+            subj = (em.get('subject') or '').strip()
+            if subj:
+                sentences.append(subj)
+            body = (em.get('body') or '')
+            body = self._strip_quotes(body)
+            for s in self._split_sentences(body):
+                if 40 <= len(s) <= 220:
+                    sentences.append(s)
+        # De-duplicate
+        seen = set()
+        uniq = []
+        for s in sentences:
+            k = s.strip().lower()
+            if k not in seen:
+                seen.add(k)
+                uniq.append(s.strip())
+        sentences = uniq
+        if not sentences:
+            return []
+        # Tokenize and compute TF-IDF
+        tokens_list = [self._tokenize(s) for s in sentences]
+        vocab = Counter()
+        for toks in tokens_list:
+            vocab.update(set(toks))
+        N = len(tokens_list)
+        # IDF
+        idf = {t: math.log((1 + N) / (1 + df)) + 1.0 for t, df in vocab.items()}
+        # TF-IDF vectors
+        vectors = []
+        for toks in tokens_list:
+            tf = Counter(toks)
+            vec = {t: (tf[t] / max(1, len(toks))) * idf.get(t, 0.0) for t in tf}
+            vectors.append(vec)
+        # Document centroid (favor recency by duplicating recent sentences)
+        centroid = Counter()
+        for i, vec in enumerate(vectors):
+            w = 1.0 + (i / max(1, len(vectors))) * 0.5
+            for t, val in vec.items():
+                centroid[t] += val * w
+        # Select with MMR
+        k = min(6, max(2, int(len(sentences) * 0.2)))
+        selected_idx = self._mmr_select(vectors, centroid, k=k, diversity=0.65)
+        # Keep original order of appearance
+        selected_idx = sorted(selected_idx)
+        return [sentences[i] for i in selected_idx]
+
+    def _mmr_select(self, vectors: List[Dict[str, float]], centroid: Counter, k: int = 5, diversity: float = 0.6) -> List[int]:
+        """Maximal Marginal Relevance selection over sparse vectors"""
+        def cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
+            if not a or not b:
+                return 0.0
+            common = set(a.keys()) & set(b.keys())
+            num = sum(a[t] * b[t] for t in common)
+            den1 = math.sqrt(sum(v*v for v in a.values()))
+            den2 = math.sqrt(sum(v*v for v in b.values()))
+            if den1 == 0 or den2 == 0:
+                return 0.0
+            return num / (den1 * den2)
+        selected: List[int] = []
+        candidates = set(range(len(vectors)))
+        while candidates and len(selected) < k:
+            best_i, best_score = -1, -1.0
+            for i in list(candidates):
+                rel = cosine(vectors[i], centroid)
+                red = 0.0
+                for j in selected:
+                    red = max(red, cosine(vectors[i], vectors[j]))
+                score = (1 - diversity) * rel - diversity * red
+                if score > best_score:
+                    best_score = score
+                    best_i = i
+            if best_i == -1:
+                break
+            selected.append(best_i)
+            candidates.remove(best_i)
+        return selected
+
+    def _tokenize(self, s: str) -> List[str]:
+        s = s.lower()
+        s = re.sub(r"http\S+", " ", s)
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        toks = [t for t in s.split() if len(t) > 2 and t not in self._stopwords()]
+        return toks
+
+    def _split_sentences(self, text: str) -> List[str]:
+        # Simple sentence splitter that respects newlines
+        text = text.replace('\r', '\n')
+        for splitter in ['\n', '. ', '! ', '? ']:
+            text = text.replace(splitter, splitter)
+        parts = re.split(r"[\n\.!\?]+", text)
+        return [p.strip() for p in parts if p and len(p.strip()) > 0]
+
+    def _strip_quotes(self, body: str) -> str:
+        # Remove common quoted sections and signatures heuristically
+        body = re.split(r"-{2,}Original Message-{2,}|From: ", body, flags=re.IGNORECASE)[0]
+        lines = []
+        for ln in body.split('\n'):
+            if ln.strip().startswith('>'):
+                continue
+            if ln.strip().lower().startswith(('sent from my', 'pozdrav', 'best regards', 'kind regards')):
+                continue
+            lines.append(ln)
+        return '\n'.join(lines)
+
+    def _stopwords(self) -> set:
+        # Compact multilingual-ish stopword set (extend over time)
+        words = {
+            'the','and','for','that','with','this','from','have','will','your','you','are','was','were','been','they','them','our','but','not','all','any','can','could','should','would','please','thank','thanks','regards','kind','best','hello','hi','dear','into','out','over','under','about','above','below','what','when','where','who','whom','why','how','which','also','asap','there','here','shall','just','let','know','get','got','done','doing','need','needed','needs','send','sent','provide','provided','confirm','confirmed','attached','attachment','see','look','looking','find','found','more','less','many','much','very','well','good','bad','great','ok','okay','alright','fine','today','yesterday','tomorrow'
+        }
+        return words
+
+    def _build_triage(self, sorted_emails: List[Dict], metadata: Dict, insights: Dict, issues: List[str]) -> Dict:
+        actions = []
+        due_soon = False
+        now = datetime.now()
+        # Consider last 5 emails for actionable lines
+        for em in sorted_emails[-5:]:
+            who = em.get('sender_email') or em.get('sender')
+            for line in (em.get('body') or '').split('\n'):
+                text = line.strip()
+                if not text or len(text) < 8:
+                    continue
+                low = text.lower()
+                is_action = ('?' in low) or any(w in low for w in ['please', 'need', 'required', 'must', 'confirm', 'send', 'provide', 'attach', 'deliver', 'ship'])
+                if not is_action:
+                    continue
+                due = self._parse_due_date(low, base=now)
+                if due and (due - now).days <= 2:
+                    due_soon = True
+                actions.append({
+                    'description': text[:240],
+                    'owner_guess': 'me_or_team',
+                    'requested_by': who,
+                    'due_date': due.isoformat() if due else None
+                })
+        # Escalation
+        escalate = metadata.get('is_urgent') or metadata.get('has_delay')
+        last_dt = sorted_emails[-1]['received_time'] if sorted_emails else None
+        try:
+            if last_dt and hasattr(last_dt, 'tzinfo') and last_dt.tzinfo:
+                last_dt = last_dt.replace(tzinfo=None)
+            if last_dt and (now - last_dt).days >= 2 and insights.get('response_needed'):
+                escalate = True
+        except Exception:
+            pass
+        suggested_next = insights.get('next_action') or (actions[0]['description'] if actions else 'Monitor thread')
+        return {
+            'actions': actions[:8],
+            'due_soon': due_soon,
+            'escalate': bool(escalate),
+            'suggested_next_step': suggested_next
+        }
+
+    def _parse_due_date(self, text: str, base: datetime) -> Optional[datetime]:
+        # Common patterns: EOD, tomorrow, dd/mm, yyyy-mm-dd, dd.mm.yyyy, weekdays
+        t = text.lower()
+        if 'eod' in t:
+            dt = datetime(base.year, base.month, base.day, 17, 0)
+            if base.hour > 17:
+                dt = dt.replace(day=base.day)  # still today; user can adjust
+            return dt
+        if 'tomorrow' in t:
+            return base + timedelta(days=1)
+        # explicit dates
+        m = re.search(r"\b(\d{1,2})[\./-](\d{1,2})(?:[\./-](\d{2,4}))?\b", t)
+        if m:
+            d, mth, y = int(m.group(1)), int(m.group(2)), m.group(3)
+            y = int(y) if y else base.year
+            try:
+                return datetime(y, mth, d, 17, 0)
+            except Exception:
+                pass
+        m = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", t)
+        if m:
+            y, mth, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return datetime(y, mth, d, 17, 0)
+            except Exception:
+                pass
+        # weekdays
+        weekdays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+        for idx, name in enumerate(weekdays):
+            if name in t:
+                delta = (idx - base.weekday()) % 7
+                delta = 7 if delta == 0 else delta
+                return base + timedelta(days=delta)
+        return None
     
     def format_summary_markdown(self, summary: Dict) -> str:
         """Format summary as Markdown"""

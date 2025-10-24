@@ -124,10 +124,12 @@ class OutlookThreadManager:
                         'email': email,
                         'subject': email.Subject,
                         'sender': email.SenderName,
+                        'sender_email': getattr(email, 'SenderEmailAddress', None),
                         'received_time': email.ReceivedTime,
                         'body': email.Body,
                         'conversation_id': conv_id,
-                        'entry_id': email.EntryID
+                        'entry_id': email.EntryID,
+                        'recipients': self._extract_recipients(email)
                     }
                     
                     conversations[conv_id].append(email_info)
@@ -345,11 +347,13 @@ class OutlookThreadManager:
                             email_info = {
                                 'subject': item.Subject,
                                 'sender': item.SenderName if hasattr(item, 'SenderName') else 'Unknown',
+                                'sender_email': getattr(item, 'SenderEmailAddress', None),
                                 'received_time': item.ReceivedTime,
                                 'body': item.Body if hasattr(item, 'Body') else '',
                                 'has_attachments': item.Attachments.Count > 0,
                                 'attachment_count': item.Attachments.Count,
-                                'conversation_id': item.ConversationID if hasattr(item, 'ConversationID') else folder_name
+                                'conversation_id': item.ConversationID if hasattr(item, 'ConversationID') else folder_name,
+                                'recipients': self._extract_recipients(item)
                             }
                             emails.append(email_info)
                     except Exception as e:

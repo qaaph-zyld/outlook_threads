@@ -13,6 +13,7 @@ from outlook_thread_manager import OutlookThreadManager
 from thread_summarizer import ThreadSummarizer
 from timeline_generator import TimelineGenerator
 from dashboard_generator import DashboardGenerator
+from reply_flow_generator import ReplyFlowGenerator
 from interactive_review import InteractiveReviewer
 from gui_review import start_gui_review
 from task_runner_gui import start_task_runner
@@ -35,6 +36,17 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Optionally inject corporate SSL trust into Python's SSL stack
+try:
+    import truststore  # type: ignore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+try:
+    import certifi_win32  # type: ignore  # provided by python-certifi-win32
+except Exception:
+    pass
+
 
 class TransportThreadManager:
     """Main application orchestrating thread management"""
@@ -48,6 +60,7 @@ class TransportThreadManager:
         self.outlook_manager = OutlookThreadManager()
         self.summarizer = ThreadSummarizer(use_ai=config.USE_AI_SUMMARIZATION)
         self.timeline_generator = TimelineGenerator(use_interactive=(config.TIMELINE_OUTPUT_FORMAT == "html"))
+        self.flow_generator = ReplyFlowGenerator()
         self.dashboard = DashboardGenerator()
         
         # Statistics
@@ -211,7 +224,7 @@ class TransportThreadManager:
             summary = self.summarizer.summarize_thread(thread_emails, metadata)
             
             # Add to dashboard (mark as archived if old)
-            self.dashboard.add_thread(summary, is_archived=should_archive)
+            self.dashboard.add_thread(summary, is_archived=should_archive, folder_path=local_folder)
             
             # Save summary as Markdown
             summary_md = self.summarizer.format_summary_markdown(summary)
@@ -230,6 +243,16 @@ class TransportThreadManager:
                 metadata_json['end_date'] = str(metadata_json['end_date'])
                 json.dump(metadata_json, f, indent=2, ensure_ascii=False)
             logger.info(f"Metadata saved to {metadata_file}")
+            # Save triage as JSON
+            try:
+                triage = summary.get('triage')
+                if triage:
+                    triage_file = local_folder / 'triage.json'
+                    with open(triage_file, 'w', encoding='utf-8') as tf:
+                        json.dump(triage, tf, indent=2, ensure_ascii=False)
+                    logger.info(f"Triage saved to {triage_file}")
+            except Exception:
+                pass
             
             # Generate timeline
             logger.info("Generating timeline visualization...")
@@ -242,6 +265,12 @@ class TransportThreadManager:
                         self.timeline_generator.generate_gantt_chart(thread_emails, summary, timeline_path)
                     except Exception:
                         pass
+            # Generate reply flow graphs
+            try:
+                if getattr(config, 'FLOW_GRAPH_ENABLED', True):
+                    self.flow_generator.generate_flows(thread_emails, summary, local_folder)
+            except Exception as e:
+                logger.warning(f"Flow graph generation failed: {e}")
             
             logger.info(f"✓ Thread processed successfully: {thread_name}")
             
@@ -311,7 +340,7 @@ class TransportThreadManager:
             summary = self.summarizer.summarize_thread(thread_emails, metadata)
             
             # Add to dashboard (mark as archived if old)
-            self.dashboard.add_thread(summary, is_archived=should_archive)
+            self.dashboard.add_thread(summary, is_archived=should_archive, folder_path=local_folder)
             
             # Save summary as Markdown
             summary_md = self.summarizer.format_summary_markdown(summary)
@@ -329,6 +358,16 @@ class TransportThreadManager:
                 metadata_json['end_date'] = str(metadata_json['end_date'])
                 json.dump(metadata_json, f, indent=2, ensure_ascii=False)
             logger.info(f"Metadata saved to {metadata_file}")
+            # Save triage as JSON
+            try:
+                triage = summary.get('triage')
+                if triage:
+                    triage_file = local_folder / 'triage.json'
+                    with open(triage_file, 'w', encoding='utf-8') as tf:
+                        json.dump(triage, tf, indent=2, ensure_ascii=False)
+                    logger.info(f"Triage saved to {triage_file}")
+            except Exception:
+                pass
             
             # Generate timeline
             logger.info("Generating timeline...")
@@ -341,6 +380,12 @@ class TransportThreadManager:
                         self.timeline_generator.generate_gantt_chart(thread_emails, summary, timeline_path)
                     except Exception:
                         pass
+            # Generate reply flow graphs
+            try:
+                if getattr(config, 'FLOW_GRAPH_ENABLED', True):
+                    self.flow_generator.generate_flows(thread_emails, summary, local_folder)
+            except Exception as e:
+                logger.warning(f"Flow graph generation failed: {e}")
             
         except Exception as e:
             logger.error(f"Error analyzing existing thread: {e}", exc_info=True)
