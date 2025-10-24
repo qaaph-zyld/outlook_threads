@@ -2,9 +2,17 @@
 Utility script to move old threads to archive folder
 """
 import json
+import sys
+import os
 import shutil
 from pathlib import Path
 from datetime import datetime
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+
 from dateutil import parser
 import config
 

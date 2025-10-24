@@ -2,6 +2,14 @@
 Quick verification that all improvements work
 """
 from datetime import datetime
+import sys
+import os
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+
 from thread_summarizer import ThreadSummarizer
 from timeline_generator import TimelineGenerator
 from dashboard_generator import DashboardGenerator

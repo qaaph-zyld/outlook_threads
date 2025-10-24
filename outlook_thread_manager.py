@@ -5,7 +5,7 @@ Handles connection to Outlook, thread detection, and organization
 import win32com.client
 import pythoncom
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 import config
@@ -91,6 +91,15 @@ class OutlookThreadManager:
             
             emails = folder.Items
             emails.Sort("[ReceivedTime]", False)  # Oldest first
+            try:
+                if hasattr(config, 'SCAN_DAYS') and config.SCAN_DAYS:
+                    start_date = datetime.now() - timedelta(days=config.SCAN_DAYS)
+                    restrict_str = f"[ReceivedTime] >= '{start_date.strftime('%m/%d/%Y %I:%M %p')}'"
+                    emails = emails.Restrict(restrict_str)
+                    emails.Sort("[ReceivedTime]", False)
+                    logger.info(f"Applied date restrict: last {config.SCAN_DAYS} days")
+            except Exception as e:
+                logger.warning(f"Failed to restrict Items by date: {e}")
             
             total_emails = emails.Count
             logger.info(f"Found {total_emails} emails to process")

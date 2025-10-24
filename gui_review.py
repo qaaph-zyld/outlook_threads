@@ -115,6 +115,8 @@ class GUIReviewer:
         ttk.Button(btns, text="Flag Follow-Up", command=self._flag_followup).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(btns, text="Open Summary", command=self._open_summary).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(btns, text="Open Folder", command=self._open_folder).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btns, text="Open Timeline", command=self._open_timeline).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btns, text="Open Dashboard", command=self._open_dashboard).pack(side=tk.LEFT, padx=(8, 0))
 
         # Status bar
         self.status_var = tk.StringVar(value="Loading threads...")
@@ -279,6 +281,36 @@ class GUIReviewer:
                 os.startfile(str(folder))  # Windows
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open folder: {e}")
+
+    def _open_timeline(self):
+        t = self._get_selected_thread()
+        if not t:
+            return
+        folder: Path = t.get('folder')
+        if not folder:
+            return
+        try:
+            base = config.TIMELINE_FILE_NAME
+            ext = ".html" if getattr(config, 'TIMELINE_OUTPUT_FORMAT', 'png') == 'html' else ".png"
+            path_html = folder / f"{base}.html"
+            path_png = folder / f"{base}.png"
+            target = path_html if path_html.exists() else (path_png if path_png.exists() else folder / f"{base}{ext}")
+            if target.exists():
+                os.startfile(str(target))
+            else:
+                messagebox.showinfo("No file", "Timeline file not found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open timeline: {e}")
+
+    def _open_dashboard(self):
+        try:
+            dashboard = config.OUTPUT_DIR / "dashboard.html"
+            if dashboard.exists():
+                os.startfile(str(dashboard))
+            else:
+                messagebox.showinfo("No file", "Dashboard file not found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open dashboard: {e}")
 
     def _open_drafts(self):
         if not self.reviewer.drafts_created:

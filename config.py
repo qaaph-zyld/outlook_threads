@@ -24,6 +24,7 @@ ARCHIVE_FOLDER_NAME = "Archive"  # Folder for old threads
 THREAD_MIN_EMAILS = 2  # Minimum number of emails to consider as a thread (lowered for testing)
 EXCLUDED_FOLDERS = []  # Folders to exclude from processing (set at runtime)
 ARCHIVE_THRESHOLD_DAYS = 60  # Archive threads older than this (2 months)
+SCAN_DAYS = 60
 
 # AI Configuration (HuggingFace - Local, No API Key Needed!)
 # Uses transformers library with local models
@@ -43,15 +44,16 @@ KEYWORDS_CUSTOMS = ["customs", "carinska", "border", "clearance"]
 
 # Timeline Configuration
 TIMELINE_DATE_FORMAT = "%Y-%m-%d %H:%M"
-TIMELINE_OUTPUT_FORMAT = "png"  # or "html" for interactive
+TIMELINE_OUTPUT_FORMAT = "html"  # or "html" for interactive
+TIMELINE_GANTT_ENABLED = True
 
 # Developer Mode
 DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
 DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
-DEV_PROCESSING_MODE = "cached"  # "new", "existing", "both", or "cached" (skip processing, go straight to review)
+DEV_PROCESSING_MODE = "existing"  # "new", "existing", "both", or "cached" (skip processing, go straight to review)
 DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
 DEV_USE_CACHED_SUMMARIES = True  # Use existing summaries instead of regenerating
-DEV_INTERACTIVE_REVIEW = True  # Enable interactive review mode after processing
+DEV_INTERACTIVE_REVIEW = False  # Enable interactive review mode after processing
 DEV_REVIEW_UI = "gui"  # "console" or "gui"
 
 # Excel Export

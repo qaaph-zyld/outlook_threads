@@ -2,6 +2,14 @@
 Test script to verify Outlook connection and thread detection
 """
 import logging
+import sys
+import os
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, script_dir)
+sys.path.insert(0, project_root)
+
 from outlook_thread_manager import OutlookThreadManager
 
 # Configure logging

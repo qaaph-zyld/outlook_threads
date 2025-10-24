@@ -37,8 +37,8 @@ class TransportThreadManager:
         logger.info("=" * 80)
         
         self.outlook_manager = OutlookThreadManager()
-        self.summarizer = ThreadSummarizer()
-        self.timeline_generator = TimelineGenerator()
+        self.summarizer = ThreadSummarizer(use_ai=config.USE_AI_SUMMARIZATION)
+        self.timeline_generator = TimelineGenerator(use_interactive=(config.TIMELINE_OUTPUT_FORMAT == "html"))
         self.dashboard = DashboardGenerator()
         
         # Statistics
@@ -228,6 +228,11 @@ class TransportThreadManager:
             if self.timeline_generator.generate_timeline(thread_emails, summary, timeline_path):
                 self.stats['timelines_created'] += 1
                 logger.info(f"Timeline saved to {timeline_path}")
+                if getattr(config, 'TIMELINE_GANTT_ENABLED', False):
+                    try:
+                        self.timeline_generator.generate_gantt_chart(thread_emails, summary, timeline_path)
+                    except Exception:
+                        pass
             
             logger.info(f"✓ Thread processed successfully: {thread_name}")
             
@@ -310,10 +315,15 @@ class TransportThreadManager:
             
             # Generate timeline
             logger.info("Generating timeline...")
-            timeline_path = str(local_folder / "timeline")
+            timeline_path = str(local_folder / config.TIMELINE_FILE_NAME)
             if self.timeline_generator.generate_timeline(thread_emails, summary, timeline_path):
                 logger.info(f"Timeline saved")
                 self.stats['timelines_created'] += 1
+                if getattr(config, 'TIMELINE_GANTT_ENABLED', False):
+                    try:
+                        self.timeline_generator.generate_gantt_chart(thread_emails, summary, timeline_path)
+                    except Exception:
+                        pass
             
         except Exception as e:
             logger.error(f"Error analyzing existing thread: {e}", exc_info=True)
