@@ -6,3 +6,6 @@ plotly
 transformers
 torch
 python-dateutil
+ttkbootstrap
+rich
+schedule

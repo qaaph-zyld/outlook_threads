@@ -220,7 +220,8 @@ class TimelineGenerator:
                     y=1,
                     xanchor="left",
                     x=1.02
-                )
+                ),
+                template='plotly_white'
             )
             
             # Update y-axis
@@ -363,19 +364,47 @@ class TimelineGenerator:
                     Resource=email['subject'][:50]
                 ))
             
-            # Create Gantt chart
-            fig = px.timeline(
-                tasks,
-                x_start="Start",
-                x_end="Finish",
-                y="Task",
-                color="Task",
-                hover_data=["Resource"],
-                title=f"Email Flow: {summary['thread_name']}"
-            )
-            
-            fig.update_yaxes(categoryorder="total ascending")
-            fig.update_layout(height=400)
+            # Try Plotly Express timeline when pandas is available
+            try:
+                import pandas as pd  # type: ignore
+                df = pd.DataFrame(tasks)
+                fig = px.timeline(
+                    df,
+                    x_start="Start",
+                    x_end="Finish",
+                    y="Task",
+                    color="Task",
+                    hover_data=["Resource"],
+                    title=f"Email Flow: {summary['thread_name']}"
+                )
+                fig.update_yaxes(categoryorder="total ascending")
+                fig.update_layout(height=400, template='plotly_white')
+            except Exception:
+                # Fallback without pandas: render as horizontal line segments per task
+                fig = go.Figure()
+                order = []
+                for t in tasks:
+                    if t['Task'] not in order:
+                        order.append(t['Task'])
+                for t in tasks:
+                    fig.add_trace(go.Scatter(
+                        x=[t['Start'], t['Finish']],
+                        y=[t['Task'], t['Task']],
+                        mode='lines',
+                        line=dict(width=14),
+                        name=t['Task'],
+                        hovertext=f"{t['Task']}<br>{t['Resource']}<br>{t['Start']} → {t['Finish']}",
+                        hoverinfo='text',
+                        showlegend=False
+                    ))
+                fig.update_layout(
+                    title=f"Email Flow: {summary['thread_name']}",
+                    xaxis_title="Date & Time",
+                    yaxis_title="Participant",
+                    template='plotly_white',
+                    height=400
+                )
+                fig.update_yaxes(categoryorder='array', categoryarray=order)
             
             # Save
             output_file = f"{output_path}_gantt.html"

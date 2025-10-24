@@ -17,6 +17,10 @@ from typing import List, Dict
 
 import config
 from interactive_review import InteractiveReviewer
+try:
+    import ttkbootstrap as tb
+except Exception:
+    tb = None
 
 
 class GUIReviewer:
@@ -27,7 +31,7 @@ class GUIReviewer:
         self.filtered_threads: List[Dict] = []
         self.selected_idx: int | None = None
 
-        self.root = tk.Tk()
+        self.root = tb.Window(themename="flatly") if tb else tk.Tk()
         self.root.title("Thread Review | Transport Threads")
         self.root.geometry("1100x700")
         self.root.minsize(980, 640)

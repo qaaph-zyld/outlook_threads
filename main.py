@@ -15,12 +15,17 @@ from interactive_review import InteractiveReviewer
 from gui_review import start_gui_review
 
 # Configure logging
+try:
+    from rich.logging import RichHandler
+    _stream_handler = RichHandler()
+except Exception:
+    _stream_handler = logging.StreamHandler()
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(config.LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()
+        _stream_handler
     ]
 )
 
