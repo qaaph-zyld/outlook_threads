@@ -54,7 +54,7 @@ FLOW_GRAPH_ENABLED = True
 # Developer Mode
 DEVELOPER_MODE = True  # Skip prompts, auto-confirm, use defaults
 DEV_EXCLUDED_FOLDERS = ["Customs"]  # Folders to exclude in dev mode
-DEV_PROCESSING_MODE = "existing"  # "new", "existing", "both", or "cached" (skip processing, go straight to review)
+DEV_PROCESSING_MODE = "both"  # "new", "existing", "both", or "cached" (skip processing, go straight to review)
 DEV_ARCHIVE_OLD_THREADS = True  # Auto-archive old threads in dev mode
 DEV_USE_CACHED_SUMMARIES = True  # Use existing summaries instead of regenerating
 DEV_INTERACTIVE_REVIEW = False  # Enable interactive review mode after processing

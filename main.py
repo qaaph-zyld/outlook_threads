@@ -170,7 +170,6 @@ class TransportThreadManager:
                     if _re.search(r"\b2022\b|\b2023\b|\b2024\b", name):
                         target = config.ARCHIVE_DIR / name
                         if target.exists():
-                            # Already archived: remove duplicate from threads
                             try:
                                 shutil.rmtree(str(folder))
                             except Exception:
@@ -733,7 +732,8 @@ def main():
                 manager.run_existing_threads()
             else:  # both
                 manager.run(process_threads=True)
-                manager.run_existing_threads()
+                manager2 = TransportThreadManager()
+                manager2.run_existing_threads()
         
         # Interactive review mode (GUI or Console)
         if config.DEVELOPER_MODE and config.DEV_INTERACTIVE_REVIEW:
