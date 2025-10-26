@@ -14,15 +14,7 @@ import math
 from collections import Counter
 
 logger = logging.getLogger(__name__)
-
-# Try to import HuggingFace transformers
-try:
-    from transformers import pipeline
-    import torch
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    logger.warning("HuggingFace transformers not available. Using fallback summarization.")
+TRANSFORMERS_AVAILABLE = False
 
 
 class ThreadSummarizer:
@@ -61,8 +53,13 @@ class ThreadSummarizer:
         if local_only:
             os.environ['TRANSFORMERS_OFFLINE'] = '1'
 
-        if self.use_ai and TRANSFORMERS_AVAILABLE:
+        if self.use_ai:
             try:
+                # Lazy import to avoid heavy deps if not used
+                global TRANSFORMERS_AVAILABLE
+                from transformers import pipeline  # type: ignore
+                import torch  # type: ignore
+                TRANSFORMERS_AVAILABLE = True
                 logger.info("Loading HuggingFace summarization model (first run may take a moment to download)...")
                 # Use a smaller, efficient model for summarization
                 # facebook/bart-large-cnn is good for summaries

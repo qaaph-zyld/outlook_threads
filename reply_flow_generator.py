@@ -77,7 +77,14 @@ class ReplyFlowGenerator:
         for n in nodes:
             G.add_node(n)
         for (u, v), data in edges.items():
-            G.add_edge(u, v, weight=data["count"], last_subject=data["last_subject"], last_time=str(data["last_time"]))
+            G.add_edge(
+                u,
+                v,
+                weight=data["count"],
+                last_subject=data["last_subject"],
+                last_time=str(data["last_time"]),
+                last_body=str(data.get("last_body", ""))
+            )
 
         pos = nx.spring_layout(G, seed=42, k=0.7 / math.sqrt(max(1, len(G.nodes()))))
 

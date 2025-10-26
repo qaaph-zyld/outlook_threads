@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 import config
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +362,17 @@ class OutlookThreadManager:
                         continue
                 
                 if emails:
+                    # Skip old threads beyond ARCHIVE_THRESHOLD_DAYS
+                    try:
+                        newest = max(e['received_time'] for e in emails)
+                        if hasattr(newest, 'tzinfo') and newest.tzinfo:
+                            newest = newest.replace(tzinfo=None)
+                        age_days = (datetime.now() - newest).days
+                        if age_days > config.ARCHIVE_THRESHOLD_DAYS:
+                            logger.info(f"  - Skipping old thread (> {config.ARCHIVE_THRESHOLD_DAYS} days): {folder_name}")
+                            continue
+                    except Exception:
+                        pass
                     threads[folder_name] = emails
                     logger.info(f"  - {len(emails)} emails in thread")
             
@@ -370,6 +382,52 @@ class OutlookThreadManager:
         except Exception as e:
             logger.error(f"Error getting threads from folder: {e}")
             return {}
+
+    def archive_threads_by_name(self, cutoff_year: int = 2025, cutoff_month: int = 8) -> int:
+        """Move thread subfolders from Threads to Archive based on name patterns.
+
+        Rules:
+        - Any folder name containing 2022 or 2023 or 2024 -> Archive
+        - Any folder name containing 2025-01..2025-07 -> Archive
+
+        Returns:
+            Count of folders moved.
+        """
+        try:
+            if not self.threads_folder:
+                return 0
+            archive_folder = self._get_or_create_folder(self.inbox, config.ARCHIVE_FOLDER_NAME)
+            to_move = []
+            for sub in self.threads_folder.Folders:
+                try:
+                    name = str(sub.Name)
+                    if re.search(r"\b2022\b|\b2023\b|\b2024\b", name):
+                        to_move.append(sub)
+                        continue
+                    m = re.search(r"\b(2025)-(\d{2})\b", name)
+                    if m:
+                        y = int(m.group(1))
+                        mo = int(m.group(2))
+                        if y == cutoff_year and mo < cutoff_month:
+                            to_move.append(sub)
+                except Exception:
+                    continue
+            moved = 0
+            # Move after enumeration to avoid changing collection while iterating
+            for sub in to_move:
+                try:
+                    nm = str(sub.Name)
+                    sub.MoveTo(archive_folder)  # type: ignore[attr-defined]
+                    moved += 1
+                    logger.info(f"Archived thread folder by name pattern: {nm}")
+                except Exception as e:
+                    logger.warning(f"Failed to archive folder {getattr(sub, 'Name', '<unknown>')}: {e}")
+            if moved:
+                logger.info(f"Archived {moved} old thread folders by name pattern")
+            return moved
+        except Exception as e:
+            logger.error(f"Error archiving thread folders by name: {e}")
+            return 0
     
     def create_draft_reply(self, subject: str, body: str, thread_name: str):
         """
@@ -469,6 +527,45 @@ class OutlookThreadManager:
         except Exception as e:
             logger.error(f"Error flagging thread: {e}")
             return False
+    
+    def _extract_recipients(self, item) -> List[Dict]:
+        recips: List[Dict] = []
+        try:
+            rc = getattr(item, 'Recipients', None)
+            if not rc:
+                return recips
+            count = rc.Count
+            for i in range(1, count + 1):
+                try:
+                    r = rc.Item(i)
+                    name = getattr(r, 'Name', '') or ''
+                    addr = ''
+                    try:
+                        ae = getattr(r, 'AddressEntry', None)
+                        if ae is not None:
+                            t = getattr(ae, 'Type', '')
+                            if t and str(t).upper() == 'EX':
+                                ex = None
+                                try:
+                                    ex = ae.GetExchangeUser()
+                                except Exception:
+                                    ex = None
+                                if ex is not None:
+                                    addr = getattr(ex, 'PrimarySmtpAddress', '') or ''
+                            if not addr:
+                                addr = getattr(ae, 'Address', '') or ''
+                    except Exception:
+                        pass
+                    if not addr:
+                        addr = getattr(r, 'Address', '') or ''
+                    typ = getattr(r, 'Type', 1)
+                    type_str = 'to' if typ == 1 else ('cc' if typ == 2 else ('bcc' if typ == 3 else 'other'))
+                    recips.append({'name': name, 'address': addr, 'type': type_str})
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return recips
     
     def cleanup(self):
         """Release Outlook resources"""

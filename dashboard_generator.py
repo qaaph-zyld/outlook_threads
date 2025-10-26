@@ -73,6 +73,17 @@ class DashboardGenerator:
             high_count = sum(1 for t in active_threads if t['priority_level'] == 'High')
             urgent_count = sum(1 for t in active_threads if t['is_urgent'])
             delay_count = sum(1 for t in active_threads if t['has_delay'])
+            # SLA metrics
+            def days_since(end: str) -> int:
+                try:
+                    if not end:
+                        return 0
+                    dt = datetime.fromisoformat(end)
+                    return max(0, (datetime.now() - dt.replace(tzinfo=None)).days)
+                except Exception:
+                    return 0
+            waiting_over_48h = sum(1 for t in active_threads if t['response_needed'] and days_since(t.get('end_date','')) >= 2)
+            escalations = sum(1 for t in active_threads if (t['is_urgent'] or t['has_delay'] or (t['response_needed'] and days_since(t.get('end_date','')) >= 2)))
             
             # Sort threads by priority score
             sorted_threads = sorted(active_threads, key=lambda x: x['priority_score'], reverse=True)
@@ -80,7 +91,7 @@ class DashboardGenerator:
             # Generate HTML
             html = self._generate_html_content(
                 total_threads, response_needed_count, critical_count, 
-                high_count, urgent_count, delay_count, sorted_threads
+                high_count, urgent_count, delay_count, waiting_over_48h, escalations, sorted_threads
             )
             
             # Write to file
@@ -95,7 +106,7 @@ class DashboardGenerator:
             return False
     
     def _generate_html_content(self, total, response_needed, critical, high, 
-                                urgent, delay, threads) -> str:
+                                urgent, delay, waiting_over_48h, escalations, threads) -> str:
         """Generate the HTML content"""
         
         html = f"""<!DOCTYPE html>
@@ -324,6 +335,14 @@ class DashboardGenerator:
             <div class="stat-card">
                 <div class="number" style="color: #ffc107;">{delay}</div>
                 <div class="label">Delays Reported</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" style="color: #cc7a00;">{waiting_over_48h}</div>
+                <div class="label">Awaiting Response ≥ 48h</div>
+            </div>
+            <div class="stat-card">
+                <div class="number" style="color: #6f42c1;">{escalations}</div>
+                <div class="label">Suggested Escalations</div>
             </div>
         </div>
         

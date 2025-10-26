@@ -176,6 +176,73 @@ class InteractiveReviewer:
             pass
         return ""
     
+    def _suggest_actions(self, thread: Dict) -> List[str]:
+        """Suggest actions combining triage outputs and rule-based hints (used by Task Runner)."""
+        actions: List[str] = []
+        metadata = thread.get('metadata', {})
+        triage = thread.get('triage') or {}
+        triage_actions = thread.get('triage_actions') or []
+
+        # Triage suggested next step first
+        sns = triage.get('suggested_next_step')
+        if isinstance(sns, str) and sns.strip():
+            actions.append(sns.strip())
+
+        # Prefer explicit triage actions
+        for a in triage_actions[:5]:
+            if not isinstance(a, dict):
+                continue
+            desc = (a.get('description') or '').strip()
+            due = a.get('due_date')
+            if not desc:
+                continue
+            if due:
+                actions.append(f"Due {due}: {desc}")
+            else:
+                actions.append(desc)
+
+        # Rule-based hints
+        if thread.get('response_needed'):
+            actions.append("Reply to last email (template available)")
+        if metadata.get('is_urgent'):
+            actions.append("Urgent: Prioritize immediate response")
+        if metadata.get('has_delay'):
+            actions.append("Address delay concerns mentioned in thread")
+        if thread.get('priority_score', 0) >= 60:
+            actions.append("High priority: Schedule time to handle today")
+        if metadata.get('duration_days', 0) > 7:
+            actions.append("Long-running thread: Consider escalation or closure")
+
+        # Ensure at least one suggestion
+        if not actions:
+            actions.append("Monitor for updates")
+
+        # De-duplicate while preserving order
+        seen = set()
+        unique_actions = []
+        for a in actions:
+            if a not in seen:
+                seen.add(a)
+                unique_actions.append(a)
+        return unique_actions
+    
+    def _create_draft(self, thread: Dict):
+        """Create a reply draft in Outlook for the given thread (used by Task Runner)."""
+        try:
+            template = thread.get('reply_template', '')
+            if not template:
+                template = self._generate_basic_template(thread)
+            subject = f"Re: {thread.get('name', 'Thread')}"
+            draft = self.outlook_manager.create_draft_reply(
+                subject=subject,
+                body=template,
+                thread_name=thread.get('name', '')
+            )
+            return draft
+        except Exception as e:
+            logger.error(f"Error creating draft: {e}")
+            raise
+    
     def _review_single_thread(self, thread: Dict, index: int, total: int):
         """Review a single thread and offer actions"""
         print(f"\n{'─'*80}")

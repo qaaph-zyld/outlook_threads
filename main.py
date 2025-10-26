@@ -5,6 +5,7 @@ Automatically organizes, analyzes, and visualizes email threads for transport co
 import logging
 from logging.handlers import RotatingFileHandler
 import json
+import csv
 from pathlib import Path
 from datetime import datetime
 import shutil
@@ -18,12 +19,30 @@ from interactive_review import InteractiveReviewer
 from gui_review import start_gui_review
 from task_runner_gui import start_task_runner
 
+import sys
+
 # Configure logging
-try:
-    from rich.logging import RichHandler
-    _stream_handler = RichHandler()
-except Exception:
-    _stream_handler = logging.StreamHandler()
+def _console_supports_utf8() -> bool:
+    try:
+        enc = (sys.stdout.encoding or '').lower()
+        return enc.startswith('utf')
+    except Exception:
+        return False
+
+class SafeConsoleFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            enc = sys.stdout.encoding or 'utf-8'
+            msg = record.getMessage()
+            safe = msg.encode(enc, errors='replace').decode(enc, errors='replace')
+            record.msg = safe
+            record.args = ()
+        except Exception:
+            pass
+        return True
+
+_stream_handler = logging.StreamHandler()
+_stream_handler.addFilter(SafeConsoleFilter())
 _file_handler = RotatingFileHandler(filename=str(config.LOG_FILE), maxBytes=2*1024*1024, backupCount=5, encoding='utf-8')
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
@@ -134,6 +153,46 @@ class TransportThreadManager:
         """Process existing threads from the Threads folder"""
         try:
             logger.info("Processing existing threads from Threads folder...")
+            # Pre-archive old threads by name patterns in Outlook and locally
+            try:
+                moved = self.outlook_manager.archive_threads_by_name(cutoff_year=2025, cutoff_month=8)
+                if moved:
+                    logger.info(f"Pre-archived {moved} thread folders in Outlook by name pattern")
+            except Exception as e:
+                logger.warning(f"Archive-by-name step (Outlook) failed: {e}")
+            # Mirror Outlook archives to local filesystem
+            try:
+                import re as _re
+                for folder in list(config.THREADS_DIR.iterdir()):
+                    if not folder.is_dir():
+                        continue
+                    name = folder.name
+                    if _re.search(r"\b2022\b|\b2023\b|\b2024\b", name):
+                        target = config.ARCHIVE_DIR / name
+                        if target.exists():
+                            # Already archived: remove duplicate from threads
+                            try:
+                                shutil.rmtree(str(folder))
+                            except Exception:
+                                pass
+                        else:
+                            shutil.move(str(folder), str(target))
+                        continue
+                    m = _re.search(r"\b(2025)-(\d{2})\b", name)
+                    if m:
+                        y = int(m.group(1))
+                        mo = int(m.group(2))
+                        if y == 2025 and mo < 8:
+                            target = config.ARCHIVE_DIR / name
+                            if target.exists():
+                                try:
+                                    shutil.rmtree(str(folder))
+                                except Exception:
+                                    pass
+                            else:
+                                shutil.move(str(folder), str(target))
+            except Exception as e:
+                logger.warning(f"Archive-by-name step (local folders) failed: {e}")
             
             # Get threads from Threads folder
             threads = self.outlook_manager.get_threads_from_folder()
@@ -408,7 +467,7 @@ class TransportThreadManager:
         try:
             logger.info("\nGenerating summary report...")
             
-            # Collect all thread metadata
+            # Collect all thread metadata (younger than cutoff)
             all_threads = []
             for thread_folder in config.THREADS_DIR.iterdir():
                 if thread_folder.is_dir():
@@ -416,7 +475,55 @@ class TransportThreadManager:
                     if metadata_file.exists():
                         with open(metadata_file, 'r', encoding='utf-8') as f:
                             metadata = json.load(f)
+                            try:
+                                end = metadata.get('end_date')
+                                from dateutil import parser
+                                end_dt = parser.parse(end) if isinstance(end, str) else end
+                                if end_dt and (datetime.now() - end_dt.replace(tzinfo=None)).days > config.ARCHIVE_THRESHOLD_DAYS:
+                                    continue
+                            except Exception:
+                                pass
                             all_threads.append(metadata)
+            # Collect triage actions across threads and export CSV
+            triage_rows = []
+            for thread_folder in config.THREADS_DIR.iterdir():
+                if not thread_folder.is_dir():
+                    continue
+                triage_file = thread_folder / 'triage.json'
+                meta_file = thread_folder / config.METADATA_FILE_NAME
+                thread_name = thread_folder.name
+                try:
+                    if meta_file.exists():
+                        with open(meta_file, 'r', encoding='utf-8') as mf:
+                            md = json.load(mf)
+                            thread_name = md.get('thread_name', thread_name)
+                except Exception:
+                    pass
+                if triage_file.exists():
+                    try:
+                        # Skip old threads for triage export as well
+                        from dateutil import parser
+                        end = None
+                        if meta_file.exists():
+                            with open(meta_file, 'r', encoding='utf-8') as mf:
+                                md2 = json.load(mf)
+                                end = md2.get('end_date')
+                        end_dt = parser.parse(end) if isinstance(end, str) else end
+                        if end_dt and (datetime.now() - end_dt.replace(tzinfo=None)).days > config.ARCHIVE_THRESHOLD_DAYS:
+                            continue
+                        with open(triage_file, 'r', encoding='utf-8') as tf:
+                            tri = json.load(tf) or {}
+                        for a in tri.get('actions', []) or []:
+                            triage_rows.append({
+                                'Thread': thread_name,
+                                'Description': (a.get('description') or '').replace('\n', ' ').strip(),
+                                'RequestedBy': a.get('requested_by') or '',
+                                'DueDate': a.get('due_date') or '',
+                                'DueSoon': 'Yes' if tri.get('due_soon') else 'No',
+                                'Escalate': 'Yes' if tri.get('escalate') else 'No',
+                            })
+                    except Exception:
+                        continue
             
             if not all_threads:
                 logger.info("No threads to report")
@@ -425,6 +532,17 @@ class TransportThreadManager:
             # Generate Excel report if enabled
             if config.EXPORT_TO_EXCEL:
                 self._export_to_excel(all_threads)
+            # Export triage actions CSV
+            try:
+                triage_csv = config.OUTPUT_DIR / 'triage_actions.csv'
+                with open(triage_csv, 'w', newline='', encoding='utf-8') as cf:
+                    writer = csv.DictWriter(cf, fieldnames=['Thread', 'Description', 'RequestedBy', 'DueDate', 'DueSoon', 'Escalate'])
+                    writer.writeheader()
+                    for row in triage_rows:
+                        writer.writerow(row)
+                logger.info(f"Triage actions CSV saved to {triage_csv}")
+            except Exception as e:
+                logger.warning(f"Failed to export triage CSV: {e}")
             
             # Generate text report
             report_path = config.OUTPUT_DIR / "threads_report.txt"
@@ -525,7 +643,7 @@ def main():
         
         # Check if developer mode
         if config.DEVELOPER_MODE:
-            print("🔧 DEVELOPER MODE ENABLED")
+            print("[DEV] DEVELOPER MODE ENABLED")
             print(f"  - Excluded folders: {', '.join(config.DEV_EXCLUDED_FOLDERS)}")
             print(f"  - Processing mode: {config.DEV_PROCESSING_MODE}")
             print(f"  - Min emails per thread: {config.THREAD_MIN_EMAILS}")
@@ -606,7 +724,7 @@ def main():
         manager = TransportThreadManager()
         
         if mode == 'cached':
-            print("\n📂 Using cached summaries, skipping processing...")
+            print("\n[CACHE] Using cached summaries, skipping processing...")
         else:
             print("\nStarting thread processing...")
             if mode == 'new':

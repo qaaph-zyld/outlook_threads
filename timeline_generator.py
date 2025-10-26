@@ -160,16 +160,19 @@ class TimelineGenerator:
             sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
             
             # Prepare data
-            dates = [email['received_time'] for email in sorted_emails]
+            # Convert all datetimes to ISO strings to avoid pywintypes serialization
+            dates_dt = [self._to_py_dt(email['received_time']) for email in sorted_emails]
+            dates = [d.strftime('%Y-%m-%d %H:%M:%S') for d in dates_dt]
             senders = [email['sender'] for email in sorted_emails]
             subjects = [email['subject'] for email in sorted_emails]
             
             # Create hover text
             hover_texts = []
             for email in sorted_emails:
+                dt_txt = self._format_dt(email['received_time'])
                 hover_text = (f"<b>{email['sender']}</b><br>"
                             f"{email['subject']}<br>"
-                            f"{email['received_time'].strftime('%Y-%m-%d %H:%M')}<br>"
+                            f"{dt_txt}<br>"
                             f"<i>{email['body'][:200]}...</i>")
                 hover_texts.append(hover_text)
             
@@ -233,7 +236,7 @@ class TimelineGenerator:
             
             # Save
             output_file = f"{output_path}.html"
-            fig.write_html(output_file)
+            fig.write_html(output_file, include_plotlyjs=True)
             
             logger.info(f"Interactive timeline saved to {output_file}")
             return True
@@ -345,22 +348,22 @@ class TimelineGenerator:
             # Sort emails by date
             sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
             
-            # Prepare data for Gantt chart
+            # Prepare data for Gantt chart (convert to strings)
             tasks = []
             for i, email in enumerate(sorted_emails):
                 # Calculate duration to next email or end
-                start = email['received_time']
+                start_dt = self._to_py_dt(email['received_time'])
                 if i < len(sorted_emails) - 1:
-                    end = sorted_emails[i + 1]['received_time']
+                    end_dt = self._to_py_dt(sorted_emails[i + 1]['received_time'])
                 else:
                     # Last email: add 1 hour
                     from datetime import timedelta
-                    end = start + timedelta(hours=1)
+                    end_dt = start_dt + timedelta(hours=1)
                 
                 tasks.append(dict(
                     Task=email['sender'][:30],
-                    Start=start,
-                    Finish=end,
+                    Start=start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    Finish=end_dt.strftime('%Y-%m-%d %H:%M:%S'),
                     Resource=email['subject'][:50]
                 ))
             
@@ -408,7 +411,7 @@ class TimelineGenerator:
             
             # Save
             output_file = f"{output_path}_gantt.html"
-            fig.write_html(output_file)
+            fig.write_html(output_file, include_plotlyjs=True)
             
             logger.info(f"Gantt chart saved to {output_file}")
             return True
@@ -416,3 +419,28 @@ class TimelineGenerator:
         except Exception as e:
             logger.error(f"Error generating Gantt chart: {e}")
             return False
+
+    def _to_py_dt(self, dt_obj):
+        """Convert Outlook/pywintypes datetime to Python datetime."""
+        try:
+            if isinstance(dt_obj, datetime):
+                return dt_obj
+            try:
+                # Try dateutil for robust parsing
+                from dateutil import parser
+                dt = parser.parse(str(dt_obj))
+                return dt
+            except Exception:
+                pass
+            # Fallback: try common string format
+            return datetime.fromisoformat(str(dt_obj))
+        except Exception:
+            # Last resort: now
+            return datetime.now()
+
+    def _format_dt(self, dt_obj) -> str:
+        try:
+            dt = self._to_py_dt(dt_obj)
+            return dt.strftime('%Y-%m-%d %H:%M')
+        except Exception:
+            return str(dt_obj)
