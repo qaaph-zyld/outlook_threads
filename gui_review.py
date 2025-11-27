@@ -19,6 +19,8 @@ from dateutil import parser
 
 import config
 from interactive_review import InteractiveReviewer
+from feedback_store import get_feedback_store
+from notifications import show_attention_toast
 try:
     import ttkbootstrap as tb
 except Exception:
@@ -32,6 +34,10 @@ class GUIReviewer:
         self.threads: List[Dict] = []
         self.filtered_threads: List[Dict] = []
         self.selected_idx: int | None = None
+        self.feedback_store = get_feedback_store()
+        self._wizard_indices: List[int] = []
+        self._wizard_pos: int = 0
+        self._wizard_window: tk.Toplevel | None = None
 
         self.root = tb.Window(themename="flatly") if tb else tk.Tk()
         self.root.title("Thread Review | Transport Threads")
@@ -126,6 +132,7 @@ class GUIReviewer:
         ttk.Button(btns, text="Open Folder", command=self._open_folder).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(btns, text="Open Timeline", command=self._open_timeline).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(btns, text="Open Dashboard", command=self._open_dashboard).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btns, text="Feedback", command=self._open_feedback_survey).pack(side=tk.LEFT, padx=(8, 0))
 
         # Status bar
         self.status_var = tk.StringVar(value="Loading threads...")
@@ -137,11 +144,11 @@ class GUIReviewer:
         def _worker():
             try:
                 threads = self.reviewer._load_thread_summaries(config.THREADS_DIR)
-                # Sort by priority score desc
                 threads.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
                 self.threads = threads
                 self._apply_filters()
                 self._set_status(f"Loaded {len(self.threads)} threads. Showing {len(self.filtered_threads)}")
+                self.root.after(0, self._post_load_hooks)
             except Exception as e:
                 self._set_status(f"Error loading threads: {e}")
         threading.Thread(target=_worker, daemon=True).start()
@@ -297,10 +304,16 @@ class GUIReviewer:
         t = self._get_selected_thread()
         if not t:
             return
-        folder: Path = t.get('folder')
+        folder = t.get('folder')
+        if not folder:
+            messagebox.showinfo("No folder", "No local folder is recorded for this thread.")
+            return
+        folder_path = Path(folder)
+        if not folder_path.exists():
+            messagebox.showinfo("No folder", "Local folder for this thread was not found on disk.")
+            return
         try:
-            if folder and folder.exists():
-                os.startfile(str(folder))  # Windows
+            os.startfile(str(folder_path))  # Windows
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open folder: {e}")
 
@@ -308,19 +321,26 @@ class GUIReviewer:
         t = self._get_selected_thread()
         if not t:
             return
-        folder: Path = t.get('folder')
+        folder = t.get('folder')
         if not folder:
+            messagebox.showinfo("No file", "No local folder is recorded for this thread.")
             return
+        folder_path = Path(folder)
         try:
             base = config.TIMELINE_FILE_NAME
-            ext = ".html" if getattr(config, 'TIMELINE_OUTPUT_FORMAT', 'png') == 'html' else ".png"
-            path_html = folder / f"{base}.html"
-            path_png = folder / f"{base}.png"
-            target = path_html if path_html.exists() else (path_png if path_png.exists() else folder / f"{base}{ext}")
-            if target.exists():
-                os.startfile(str(target))
+            path_svg = folder_path / f"{base}.svg"
+            path_html = folder_path / f"{base}.html"
+            path_png = folder_path / f"{base}.png"
+            if path_svg.exists():
+                target = path_svg
+            elif path_html.exists():
+                target = path_html
+            elif path_png.exists():
+                target = path_png
             else:
                 messagebox.showinfo("No file", "Timeline file not found.")
+                return
+            os.startfile(str(target))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open timeline: {e}")
 
@@ -346,6 +366,126 @@ class GUIReviewer:
             except Exception:
                 pass
         messagebox.showinfo("Drafts opened", f"Opened {opened} draft(s) in Outlook.")
+
+    def _open_feedback_survey(self):
+        t = self._get_selected_thread()
+        if not t:
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Thread Feedback")
+        win.transient(self.root)
+        win.grab_set()
+
+        tk.Label(win, text="Help improve prioritization by rating this thread.", font=("Segoe UI", 10, "bold")).pack(padx=10, pady=(10, 6), anchor="w")
+        tk.Label(win, text=t.get('name', ''), wraplength=420, justify=tk.LEFT).pack(padx=10, pady=(0, 10), anchor="w")
+
+        frame = ttk.Frame(win, padding=(10, 0))
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        pr_var = tk.StringVar(value="about_right")
+        hot_var = tk.StringVar(value="yes")
+        sla_var = tk.StringVar(value="2h")
+
+        box1 = ttk.Labelframe(frame, text="Priority judgment")
+        box1.pack(fill=tk.X, pady=(0, 8))
+        ttk.Radiobutton(box1, text="Too low", value="too_low", variable=pr_var).pack(anchor="w")
+        ttk.Radiobutton(box1, text="About right", value="about_right", variable=pr_var).pack(anchor="w")
+        ttk.Radiobutton(box1, text="Too high", value="too_high", variable=pr_var).pack(anchor="w")
+
+        box2 = ttk.Labelframe(frame, text="Was this actually a hot thread?")
+        box2.pack(fill=tk.X, pady=(0, 8))
+        ttk.Radiobutton(box2, text="Yes", value="yes", variable=hot_var).pack(anchor="w")
+        ttk.Radiobutton(box2, text="No", value="no", variable=hot_var).pack(anchor="w")
+
+        box3 = ttk.Labelframe(frame, text="Expected response time for this thread")
+        box3.pack(fill=tk.X, pady=(0, 8))
+        ttk.Radiobutton(box3, text="Within 1 hour", value="1h", variable=sla_var).pack(anchor="w")
+        ttk.Radiobutton(box3, text="Within 2 hours", value="2h", variable=sla_var).pack(anchor="w")
+        ttk.Radiobutton(box3, text="Same day", value="same_day", variable=sla_var).pack(anchor="w")
+        ttk.Radiobutton(box3, text="No strict SLA", value="none", variable=sla_var).pack(anchor="w")
+
+        ttk.Label(frame, text="Optional comment:").pack(anchor="w", pady=(4, 2))
+        txt_comment = ScrolledText(frame, height=4, wrap=tk.WORD)
+        txt_comment.pack(fill=tk.X)
+
+        btns = ttk.Frame(win)
+        btns.pack(fill=tk.X, pady=(10, 10))
+
+        def _save():
+            answers = {
+                "feedback_priority_judgment": pr_var.get(),
+                "feedback_hot_thread": hot_var.get(),
+                "feedback_expected_response": sla_var.get(),
+                "feedback_comment": txt_comment.get("1.0", tk.END).strip(),
+            }
+            try:
+                self.feedback_store.record_feedback(t, answers)
+                self._set_status("Feedback saved.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save feedback: {e}")
+            win.destroy()
+
+        ttk.Button(btns, text="Save", command=_save).pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side=tk.RIGHT)
+
+    # -------------------- WIZARD / POST-LOAD --------------------
+
+    def _post_load_hooks(self):
+        hot: List[int] = []
+        for idx, t in enumerate(self.filtered_threads):
+            if t.get('requires_attention', False) and t.get('priority_score', 0) >= 60:
+                hot.append(idx)
+        self._wizard_indices = hot
+        self._wizard_pos = 0
+
+        if hot:
+            try:
+                show_attention_toast(
+                    "Transport Threads",
+                    f"{len(hot)} high-priority threads need attention.",
+                )
+            except Exception:
+                pass
+            self._show_wizard_prompt(len(hot))
+
+    def _show_wizard_prompt(self, count: int):
+        if self._wizard_window is not None:
+            try:
+                self._wizard_window.destroy()
+            except Exception:
+                pass
+        win = tk.Toplevel(self.root)
+        self._wizard_window = win
+        win.title("Hot Threads Review")
+        win.transient(self.root)
+
+        tk.Label(win, text=f"{count} hot threads detected.", font=("Segoe UI", 11, "bold")).pack(padx=10, pady=(10, 4))
+        tk.Label(win, text="Click Next to step through them one by one, or Close to skip.").pack(padx=10, pady=(0, 10))
+
+        btns = ttk.Frame(win)
+        btns.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(btns, text="Next", command=self._wizard_next).pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(btns, text="Close", command=win.destroy).pack(side=tk.RIGHT)
+
+    def _wizard_next(self):
+        if not self._wizard_indices or self._wizard_pos >= len(self._wizard_indices):
+            if self._wizard_window is not None:
+                try:
+                    self._wizard_window.destroy()
+                except Exception:
+                    pass
+            return
+        idx = self._wizard_indices[self._wizard_pos]
+        self._wizard_pos += 1
+        iid = str(idx)
+        try:
+            self.tree.selection_set(iid)
+            self.tree.see(iid)
+            self._on_select()
+        except Exception:
+            pass
 
     # -------------------- UTIL --------------------
     def _set_status(self, text: str):

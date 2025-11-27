@@ -164,7 +164,7 @@ class ThreadSummarizer:
             action_items = self._extract_action_items(sorted_emails)
             issues = self._extract_issues(sorted_emails)
             insights = self._extract_conversation_insights(sorted_emails)
-            priority = self._calculate_priority_score(sorted_emails, metadata)
+            priority = self._calculate_priority_score(sorted_emails, metadata, insights)
             # Extractive summary from recent sentences
             extractive = self._extractive_summary(sorted_emails)
             
@@ -292,81 +292,127 @@ class ThreadSummarizer:
         
         return action_items[:5]  # Limit to 5 items
     
-    def _calculate_priority_score(self, sorted_emails: List[Dict], metadata: Dict) -> Dict:
-        """
-        Calculate priority score (0-100) for a thread
-        Higher score = more urgent/important
+    def _calculate_priority_score(self, sorted_emails: List[Dict], metadata: Dict, insights: Optional[Dict] = None) -> Dict:
+        """Calculate priority / hotness score (0-100) for a thread.
+
+        Higher score = more urgent/important. Incorporates:
+        - Urgent / delay flags
+        - Response-needed signals
+        - Time since last email (hours)
+        - Simple due-date detection (EOD, tomorrow, explicit dates)
+        - Volume / participants
         """
         score = 0
-        factors = []
-        
+        factors: List[str] = []
+
         if not sorted_emails:
             return {'score': 0, 'priority': 'Low', 'factors': []}
-        
-        # Factor 1: Urgency keywords (+30 points)
-        if metadata.get('is_urgent'):
-            score += 30
-            factors.append("Contains urgent keywords")
-        
-        # Factor 2: Response needed (+25 points)
+
         last_email = sorted_emails[-1]
-        last_body = last_email['body'].lower()
-        if '?' in last_body or any(word in last_body for word in ['please confirm', 'can you', 'need your']):
-            score += 25
-            factors.append("Response/action required")
-        
-        # Factor 3: Recent activity (+20 points if < 2 days)
+        last_body = (last_email.get('body') or '').lower()
+
+        # Response-needed heuristic (use insights if provided)
+        response_needed = False
+        if insights is not None:
+            response_needed = bool(insights.get('response_needed'))
+        else:
+            question_indicators = ['?', 'please confirm', 'can you', 'could you', 'would you',
+                                   'need your', 'waiting for', 'please provide', 'please send']
+            if any(ind in last_body for ind in question_indicators):
+                response_needed = True
+
+        # Age in hours since last email
         received_time = last_email['received_time']
         if hasattr(received_time, 'tzinfo') and received_time.tzinfo:
             received_time = received_time.replace(tzinfo=None)
-        days_since_last = (datetime.now() - received_time).days
-        if days_since_last < 2:
-            score += 20
-            factors.append("Recent activity (< 2 days)")
-        elif days_since_last > 7:
-            score -= 10  # Deduct for old threads
-            factors.append("No recent activity (> 7 days)")
-        
-        # Factor 4: Multiple participants (+10 points if > 3)
+        age_delta = datetime.now() - received_time
+        age_hours = age_delta.total_seconds() / 3600.0
+        age_days = age_delta.days
+
+        # Urgent flag
+        if metadata.get('is_urgent'):
+            score += 35
+            factors.append("Contains urgent indicators")
+
+        # Delay flag
+        if metadata.get('has_delay'):
+            score += 25
+            factors.append("Thread discusses delays")
+
+        # Response needed
+        if response_needed:
+            score += 25
+            factors.append("Response / decision requested in last email")
+
+        # SLA-style timing (aim ~1–2h response when response_needed)
+        hot_soon = False
+        if response_needed:
+            if age_hours >= 2 and age_hours < 24:
+                score += 20
+                factors.append("Response overdue (>2h) for last request")
+            elif age_hours >= 1:
+                score += 10
+                hot_soon = True
+                factors.append("Response due soon (1–2h window)")
+
+        # Very old, inactive threads (penalty if not marked urgent/delay)
+        if age_days > 7 and not metadata.get('is_urgent') and not metadata.get('has_delay'):
+            score -= 15
+            factors.append("Stale thread (>7 days since last activity)")
+
+        # Explicit due dates / EOD / tomorrow
+        try:
+            due = self._parse_due_date(last_body, base=datetime.now())
+        except Exception:
+            due = None
+        if due:
+            try:
+                remaining = (due - datetime.now()).total_seconds() / 3600.0
+                if remaining <= 48:
+                    score += 15
+                    hot_soon = True
+                    factors.append("Upcoming due date within 48h")
+            except Exception:
+                pass
+
+        # Multiple stakeholders
         if metadata.get('participant_count', 0) > 3:
             score += 10
             factors.append("Multiple stakeholders involved")
-        
-        # Factor 5: Delays/issues (+15 points)
-        if metadata.get('has_delay'):
-            score += 15
-            factors.append("Contains delay indicators")
-        
-        # Factor 6: High email volume (+10 points if > 10 emails)
+
+        # High email volume
         if metadata.get('email_count', 0) > 10:
             score += 10
             factors.append("High email volume (active discussion)")
-        
-        # Factor 7: Customs/Transport flags (+5 points each)
+
+        # Customs / transport context
         if metadata.get('is_customs'):
             score += 5
             factors.append("Customs-related")
         if metadata.get('is_transport'):
             score += 5
             factors.append("Transport-related")
-        
+
         # Normalize score to 0-100
         score = min(100, max(0, score))
-        
-        # Determine priority level
-        if score >= 70:
+
+        # Priority buckets
+        if score >= 80:
             priority = 'Critical'
-        elif score >= 50:
+        elif score >= 60:
             priority = 'High'
-        elif score >= 30:
+        elif score >= 35:
             priority = 'Medium'
         else:
             priority = 'Low'
-        
+
         return {
             'score': score,
             'priority': priority,
-            'factors': factors
+            'factors': factors,
+            'response_needed': response_needed,
+            'age_hours': round(age_hours, 1),
+            'hot_soon': hot_soon,
         }
     
     def _extract_conversation_insights(self, sorted_emails: List[Dict]) -> Dict:
@@ -566,7 +612,7 @@ class ThreadSummarizer:
         try:
             sorted_emails = sorted(thread_emails, key=lambda x: x['received_time'])
             insights = self._extract_conversation_insights(sorted_emails)
-            priority = self._calculate_priority_score(sorted_emails, metadata)
+            priority = self._calculate_priority_score(sorted_emails, metadata, insights)
             reply_template = self._generate_reply_template(insights, metadata)
         except Exception as e:
             logger.warning(f"Error in fallback summary generation: {e}")
@@ -861,20 +907,6 @@ class ThreadSummarizer:
             # Waiting on
             if insights['waiting_on']:
                 md += f"**Waiting On**: {insights['waiting_on']}\n\n"
-            
-            # Conversation flow
-            if insights['conversation_flow']:
-                md += "### Recent Conversation Flow\n\n"
-                for msg in insights['conversation_flow']:
-                    md += f"**{msg['date']}** - {msg['sender']}\n"
-                    md += f"> {msg['preview']}\n\n"
-            
-            # Key discussion points
-            if insights['key_points']:
-                md += "### Key Discussion Points\n\n"
-                for point in insights['key_points']:
-                    md += f"- {point}\n"
-                md += "\n"
         
         # Key Events
         if summary['key_events']:
@@ -890,18 +922,22 @@ class ThreadSummarizer:
                 md += f"- {stakeholder}\n"
             md += "\n"
         
-        # Action Items
+        # Action Items (limit display to top 3)
         if summary['action_items']:
             md += "## Action Items\n\n"
-            for item in summary['action_items']:
+            for item in summary['action_items'][:3]:
                 md += f"- [ ] {item}\n"
+            if len(summary['action_items']) > 3:
+                md += f"- … ({len(summary['action_items']) - 3} more in thread)\n"
             md += "\n"
         
-        # Issues/Risks
+        # Issues/Risks (limit display to top 3)
         if summary['issues_risks']:
             md += "## Issues & Risks\n\n"
-            for issue in summary['issues_risks']:
+            for issue in summary['issues_risks'][:3]:
                 md += f"- ⚠️ {issue}\n"
+            if len(summary['issues_risks']) > 3:
+                md += f"- … ({len(summary['issues_risks']) - 3} more in thread)\n"
             md += "\n"
         
         # Reply Template
@@ -911,7 +947,83 @@ class ThreadSummarizer:
             md += summary['reply_template']
             md += "\n```\n\n"
         
+        # NLP Analysis (if available)
+        if 'nlp_analysis' in summary:
+            nlp = summary['nlp_analysis']
+            
+            md += "## 🔬 Advanced NLP Analysis\n\n"
+            
+            # Sentiment Analysis
+            if 'thread_sentiment' in nlp:
+                sentiment = nlp['thread_sentiment']
+                sentiment_emoji = {
+                    'positive': '😊',
+                    'negative': '😟',
+                    'neutral': '😐'
+                }.get(sentiment.get('overall_label', 'neutral'), '😐')
+                
+                md += f"### Sentiment: {sentiment_emoji} {sentiment.get('overall_label', 'neutral').title()}\n"
+                md += f"- **Score**: {sentiment.get('average_compound', 0):.2f} (-1 to +1 scale)\n"
+                
+                if 'sentiment_trend' in nlp:
+                    trend = nlp['sentiment_trend']
+                    trend_emoji = {'improving': '📈', 'declining': '📉', 'stable': '➡️'}.get(trend.get('trend', 'stable'), '➡️')
+                    md += f"- **Trend**: {trend_emoji} {trend.get('trend', 'stable').title()}\n"
+                md += "\n"
+            
+            # Entities
+            if 'all_entities' in nlp:
+                entities = nlp['all_entities']
+                has_entities = any(len(v) > 0 for v in entities.values())
+                if has_entities:
+                    md += "### Extracted Entities\n"
+                    for ent_type, ent_list in entities.items():
+                        if ent_list:
+                            names = [e['entity'] if isinstance(e, dict) else e for e in ent_list[:5]]
+                            md += f"- **{ent_type.title()}**: {', '.join(names)}\n"
+                    md += "\n"
+            
+            # Response Times
+            if 'response_times' in nlp:
+                rt = nlp['response_times']
+                if rt.get('average_hours', 0) > 0:
+                    md += "### Response Time Analysis\n"
+                    md += f"- **Average**: {rt.get('average_hours', 0):.1f} hours\n"
+                    md += f"- **Fastest**: {rt.get('min_hours', 0):.1f} hours\n"
+                    md += f"- **Slowest**: {rt.get('max_hours', 0):.1f} hours\n"
+                    if rt.get('sla_breaches', 0) > 0:
+                        md += f"- **⚠️ SLA Breaches (>24h)**: {rt.get('sla_breaches', 0)}\n"
+                    md += "\n"
+        
         # Footer
         md += f"\n---\n*Summary generated using {summary['method']} method*\n"
         
         return md
+    
+    def enhance_with_nlp(self, summary: Dict, thread_emails: List[Dict]) -> Dict:
+        """
+        Enhance summary with NLP analysis (spaCy + VADER)
+        
+        This adds:
+        - Sentiment analysis
+        - Named entity extraction
+        - Response time analytics
+        - Communication patterns
+        """
+        try:
+            from nlp_analyzer import get_nlp_analyzer
+            
+            analyzer = get_nlp_analyzer()
+            nlp_result = analyzer.analyze_thread(thread_emails)
+            
+            summary['nlp_analysis'] = nlp_result
+            summary['method'] = summary.get('method', 'rule_based') + '+nlp'
+            
+            logger.info("Enhanced summary with NLP analysis")
+            
+        except ImportError:
+            logger.debug("NLP analyzer not available - skipping enhancement")
+        except Exception as e:
+            logger.warning(f"NLP enhancement failed: {e}")
+        
+        return summary

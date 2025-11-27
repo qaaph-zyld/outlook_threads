@@ -55,7 +55,13 @@ class TimelineGenerator:
         """
         try:
             if self.use_interactive:
-                return self._generate_interactive_timeline(thread_emails, summary, output_path)
+                ok_html = self._generate_interactive_timeline(thread_emails, summary, output_path)
+                if self.use_static:
+                    try:
+                        self._generate_static_timeline(thread_emails, summary, output_path)
+                    except Exception as e:
+                        logger.warning("Static timeline generation failed: %s", e)
+                return ok_html
             elif self.use_static:
                 return self._generate_static_timeline(thread_emails, summary, output_path)
             else:
@@ -142,11 +148,16 @@ class TimelineGenerator:
             plt.tight_layout()
             
             # Save
-            output_file = f"{output_path}.png"
-            plt.savefig(output_file, dpi=300, bbox_inches='tight')
+            output_file_png = f"{output_path}.png"
+            output_file_svg = f"{output_path}.svg"
+            plt.savefig(output_file_png, dpi=300, bbox_inches='tight')
+            try:
+                plt.savefig(output_file_svg, format="svg", bbox_inches='tight')
+            except Exception as e:
+                logger.warning("Failed to save SVG timeline: %s", e)
             plt.close()
             
-            logger.info(f"Static timeline saved to {output_file}")
+            logger.info(f"Static timeline saved to {output_file_png} (PNG) and {output_file_svg} (SVG)")
             return True
             
         except Exception as e:

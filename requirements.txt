@@ -1,12 +1,53 @@
+# Core Windows Integration
 pywin32==306
-pandas
-openpyxl
-matplotlib
-plotly
-transformers
-torch
-python-dateutil
-ttkbootstrap
-rich
-schedule
-networkx
+
+# Data Processing
+pandas>=2.0.0
+openpyxl>=3.1.0
+python-dateutil>=2.8.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.18.0
+networkx>=3.0
+
+# AI/ML - Local Summarization (HuggingFace)
+transformers>=4.35.0
+torch>=2.0.0
+
+# NLP Analysis (FREE - No API Costs!)
+spacy>=3.7.0
+vaderSentiment>=3.3.2
+keybert>=0.8.0
+email-reply-parser>=0.5.12
+textblob>=0.18.0
+langdetect>=1.0.9
+sentence-transformers>=2.2.0
+
+# Modern Web Dashboard (FastAPI Stack)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+websockets>=12.0
+sse-starlette>=1.8.0
+aiofiles>=23.2.0
+
+# GUI
+ttkbootstrap>=1.10.0
+rich>=13.0.0
+
+# Utilities
+schedule>=1.2.0
+
+# Notifications
+win10toast>=0.9
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx>=0.25.0  # For FastAPI TestClient
+
+# Optional: Download spaCy English model after install
+# python -m spacy download en_core_web_sm
